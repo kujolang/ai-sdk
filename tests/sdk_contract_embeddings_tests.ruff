@@ -1,0 +1,340 @@
+test_setup {
+	from src.providers import openai_provider, deepseek_provider, custom_openai_compatible_provider, custom_openai_compatible_provider_with_options
+	from src.ai_sdk import create_client, create_message, build_chat_payload, chat_completion, chat_completion_stream, embeddings, provider_supports, standard_error_response, normalize_provider_error, parse_json_contract, parse_sse_contract, should_retry_error_result, retry_delay_contract, merge_headers_for_request, normalize_non_stream_success, normalize_stream_success, resolve_options, sdk_default_limits, sdk_contract_version
+}
+
+test "embeddings fixture returns normalized contract" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+
+	result := embeddings(client, "hello embeddings", {
+		"offline_fixture": true
+	})
+	assert_true(result["ok"])
+	assert_true(type(result["embeddings"]) == "array")
+	assert_true(len(result["embeddings"]) > 0)
+	assert_equal(result["embeddings"][0]["index"], 0)
+}
+
+test "embeddings supports injected transport success path" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+
+	transport_ok := func(url, request_options) {
+		return Ok({
+			"_status": 200,
+			"_body": "{\"model\":\"text-embedding-3-small\",\"data\":[{\"index\":0,\"embedding\":[0.1,0.2,0.3]}],\"usage\":{\"prompt_tokens\":4,\"total_tokens\":4}}"
+		})
+	}
+
+	result := embeddings(client, "embed me", {
+		"transport": transport_ok,
+		"max_retries": 0
+	})
+	assert_true(result["ok"])
+	assert_equal(result["model"], "text-embedding-3-small")
+	assert_equal(result["embeddings"][0]["index"], 0)
+	assert_equal(result["usage"]["total_tokens"], 4)
+}
+
+test "embeddings returns unsupported feature when provider has no embeddings capability" {
+	provider := openai_provider()
+	provider["capabilities"] := {
+		"streaming": true,
+		"tool_calls": true,
+		"json_mode": true,
+		"embeddings": false
+	}
+	client := create_client(provider, "fixture-key")
+
+	result := embeddings(client, "embed me", {
+		"offline_fixture": false
+	})
+	assert_false(result["ok"])
+	assert_equal(result["error"]["code"], "unsupported_feature")
+}
+
+test "embeddings retries on 429 and succeeds within retry budget" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+	call_count := 0
+
+	transport_retry_burst := func(url, request_options) {
+		call_count := call_count + 1
+		if call_count <= 2 {
+			return Ok({
+				"_status": 429,
+				"_body": "{\"error\":{\"message\":\"rate limited\"}}"
+			})
+		}
+		return Ok({
+			"_status": 200,
+			"_body": "{\"model\":\"text-embedding-3-small\",\"data\":[{\"index\":0,\"embedding\":[0.1,0.2,0.3]}],\"usage\":{\"prompt_tokens\":4,\"total_tokens\":4}}"
+		})
+	}
+
+	result := embeddings(client, "embed me", {
+		"transport": transport_retry_burst,
+		"max_retries": 3,
+		"retry_budget": 3,
+		"retry_delay_ms": 1,
+		"max_retry_delay_ms": 2
+	})
+
+	assert_true(result["ok"])
+	assert_equal(result["status_code"], 200)
+	assert_equal(result["model"], "text-embedding-3-small")
+}
+
+test "embeddings does not retry on non-retryable 400" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+	call_count := 0
+
+	transport_http_400 := func(url, request_options) {
+		call_count := call_count + 1
+		if call_count == 1 {
+			return Ok({
+				"_status": 400,
+				"_body": "{\"error\":{\"message\":\"bad request\"}}"
+			})
+		}
+		return Ok({
+			"_status": 200,
+			"_body": "{\"model\":\"text-embedding-3-small\",\"data\":[{\"index\":0,\"embedding\":[0.1,0.2,0.3]}],\"usage\":{\"prompt_tokens\":4,\"total_tokens\":4}}"
+		})
+	}
+
+	result := embeddings(client, "embed me", {
+		"transport": transport_http_400,
+		"max_retries": 3,
+		"retry_budget": 3,
+		"retry_delay_ms": 1
+	})
+
+	assert_false(result["ok"])
+	assert_equal(result["error"]["code"], "http_error")
+	assert_equal(result["status_code"], 400)
+}
+
+test "embeddings input budget fails fast before transport" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+
+	transport_should_not_run := func(url, request_options) {
+		return Ok({
+			"_status": 200,
+			"_body": "{\"model\":\"text-embedding-3-small\",\"data\":[{\"index\":0,\"embedding\":[0.1,0.2,0.3]}],\"usage\":{\"prompt_tokens\":4,\"total_tokens\":4}}"
+		})
+	}
+
+	result := embeddings(client, "0123456789", {
+		"transport": transport_should_not_run,
+		"max_prompt_characters": 5,
+		"max_retries": 0
+	})
+
+	assert_false(result["ok"])
+	assert_equal(result["error"]["code"], "request_budget_exceeded")
+}
+
+test "embeddings fallback succeeds on retryable primary failure" {
+	primary_provider := openai_provider()
+	primary_provider["transport"] := func(url, request_options) {
+		return Ok({
+			"_status": 429,
+			"_body": "{\"error\":{\"message\":\"rate limited\"}}"
+		})
+	}
+
+	fallback_provider := deepseek_provider()
+	fallback_provider["name"] := "fallback-deepseek"
+	fallback_provider["transport"] := func(url, request_options) {
+		return Ok({
+			"_status": 200,
+			"_body": "{\"model\":\"text-embedding-3-small\",\"data\":[{\"index\":0,\"embedding\":[0.1,0.2,0.3]}],\"usage\":{\"prompt_tokens\":4,\"total_tokens\":4}}"
+		})
+	}
+
+	client := create_client(primary_provider, "fixture-key")
+	result := embeddings(client, "fallback me", {
+		"fallback_providers": [{
+			"provider": fallback_provider,
+			"api_key": "fallback-key"
+		}],
+		"max_retries": 0,
+		"retry_budget": 0
+	})
+
+	assert_true(result["ok"])
+	assert_equal(result["status_code"], 200)
+	assert_equal(result["fallback"]["used"], true)
+	assert_equal(result["fallback"]["provider"], "fallback-deepseek")
+}
+
+test "embeddings fallback is skipped on non-retryable primary failure" {
+	primary_provider := openai_provider()
+	primary_provider["transport"] := func(url, request_options) {
+		return Ok({
+			"_status": 400,
+			"_body": "{\"error\":{\"message\":\"bad request\"}}"
+		})
+	}
+
+	fallback_provider := deepseek_provider()
+	fallback_provider["name"] := "fallback-deepseek"
+	fallback_provider["transport"] := func(url, request_options) {
+		return Ok({
+			"_status": 200,
+			"_body": "{\"model\":\"text-embedding-3-small\",\"data\":[{\"index\":0,\"embedding\":[0.1,0.2,0.3]}],\"usage\":{\"prompt_tokens\":4,\"total_tokens\":4}}"
+		})
+	}
+
+	client := create_client(primary_provider, "fixture-key")
+	result := embeddings(client, "fallback me", {
+		"fallback_providers": [{
+			"provider": fallback_provider,
+			"api_key": "fallback-key"
+		}],
+		"max_retries": 0,
+		"retry_budget": 0
+	})
+
+	assert_false(result["ok"])
+	assert_equal(result["status_code"], 400)
+	assert_equal(result["error"]["code"], "http_error")
+	assert_equal(has_key(result, "fallback"), 0)
+}
+
+test "embeddings observability counters include start complete and retry" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+	call_count := 0
+
+	transport_retry_once := func(url, request_options) {
+		call_count := call_count + 1
+		if call_count == 1 {
+			return Ok({
+				"_status": 429,
+				"_body": "{\"error\":{\"message\":\"rate limited\"}}"
+			})
+		}
+		return Ok({
+			"_status": 200,
+			"_body": "{\"model\":\"text-embedding-3-small\",\"data\":[{\"index\":0,\"embedding\":[0.1,0.2,0.3]}],\"usage\":{\"prompt_tokens\":4,\"total_tokens\":4}}"
+		})
+	}
+
+	result := embeddings(client, "obs embedding", {
+		"transport": transport_retry_once,
+		"max_retries": 1,
+		"retry_budget": 1,
+		"retry_delay_ms": 1,
+		"max_retry_delay_ms": 1
+	})
+
+	assert_true(result["ok"])
+	assert_equal(result["observability"]["retry_count"], 1)
+	assert_equal(result["observability"]["start_count"], 2)
+	assert_equal(result["observability"]["complete_count"], 2)
+	assert_true(len(result["observability"]["trace_id"]) > 0)
+}
+
+test "embeddings tolerates throwing observability hooks during retries" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+
+	on_start := func(event) {
+		parse_json("{")
+	}
+	on_complete := func(event) {
+		parse_json("{")
+	}
+	on_retry := func(event) {
+		parse_json("{")
+	}
+
+	call_count := 0
+	transport_retry_once := func(url, request_options) {
+		call_count := call_count + 1
+		if call_count == 1 {
+			return Ok({
+				"_status": 429,
+				"_body": "{\"error\":{\"message\":\"rate limited\"}}"
+			})
+		}
+		return Ok({
+			"_status": 200,
+			"_body": "{\"model\":\"text-embedding-3-small\",\"data\":[{\"index\":0,\"embedding\":[0.1,0.2,0.3]}],\"usage\":{\"prompt_tokens\":4,\"total_tokens\":4}}"
+		})
+	}
+
+	result := embeddings(client, "obs embedding", {
+		"transport": transport_retry_once,
+		"on_request_start": on_start,
+		"on_request_complete": on_complete,
+		"on_retry": on_retry,
+		"max_retries": 1,
+		"retry_budget": 1,
+		"retry_delay_ms": 1,
+		"max_retry_delay_ms": 1
+	})
+
+	assert_true(result["ok"])
+	assert_equal(result["observability"]["retry_count"], 1)
+	assert_equal(result["observability"]["start_count"], 2)
+	assert_equal(result["observability"]["complete_count"], 2)
+}
+
+test "embeddings honors absolute deadline_ms and fails deterministicly" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+	metrics := {"calls": 0}
+
+	transport_should_not_run := func(url, request_options) {
+		metrics["calls"] := metrics["calls"] + 1
+		return Ok({
+			"_status": 200,
+			"_body": "{\"model\":\"text-embedding-3-small\",\"data\":[{\"index\":0,\"embedding\":[0.1,0.2,0.3]}],\"usage\":{\"prompt_tokens\":4,\"total_tokens\":4}}"
+		})
+	}
+
+	result := embeddings(client, "deadline check", {
+		"transport": transport_should_not_run,
+		"deadline_ms": current_timestamp() - 1,
+		"max_retries": 0
+	})
+
+	assert_false(result["ok"])
+	assert_equal(result["error"]["code"], "deadline_exceeded")
+	assert_equal(result["status_code"], 408)
+	assert_equal(metrics["calls"], 0)
+}
+
+test "embeddings overall_timeout_ms stops retry loop before next attempt" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+	metrics := {"calls": 0}
+
+	transport_retryable := func(url, request_options) {
+		metrics["calls"] := metrics["calls"] + 1
+		return Ok({
+			"_status": 429,
+			"_body": "{\"error\":{\"message\":\"rate limited\"}}"
+		})
+	}
+
+	result := embeddings(client, "deadline retry", {
+		"transport": transport_retryable,
+		"max_retries": 3,
+		"retry_budget": 3,
+		"retry_delay_ms": 20,
+		"max_retry_delay_ms": 20,
+		"overall_timeout_ms": 5
+	})
+
+	assert_false(result["ok"])
+	assert_equal(result["error"]["code"], "deadline_exceeded")
+	assert_equal(result["status_code"], 408)
+	assert_true(metrics["calls"] <= 1)
+}

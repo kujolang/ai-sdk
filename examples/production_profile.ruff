@@ -1,0 +1,44 @@
+from src.providers import openai_provider
+from src.ai_sdk import create_client, create_message, chat_completion
+
+print("Kujo AI SDK Production Profile Example")
+print("--------------------------------------")
+
+provider := openai_provider()
+client := create_client(provider, "fixture-key")
+messages := [
+	create_message("system", "You are concise and operationally safe."),
+	create_message("user", "Return a short readiness summary.")
+]
+
+production_options := {
+	"temperature": 0.1,
+	"max_tokens": 200,
+	"max_retries": 3,
+	"retry_budget": 2,
+	"retry_jitter_ms": 40,
+	"retry_delay_ms": 250,
+	"max_retry_delay_ms": 2000,
+	"timeout": 30.0,
+	"circuit_breaker_enabled": true,
+	"circuit_breaker_error_threshold": 6,
+	"circuit_breaker_cooldown_ms": 15000,
+	"circuit_breaker_half_open_enabled": true,
+	"circuit_breaker_half_open_max_retries": 0,
+	"max_prompt_characters": 16000,
+	"max_tools_per_request": 16,
+	"max_in_flight_requests": 4,
+	"offline_fixture": true
+}
+
+result := chat_completion(client, messages, production_options)
+
+print("Result ok:", result["ok"])
+print("Provider:", result["provider"])
+print("Contract version:", result["contract_version"])
+print("Output:", result["output_text"])
+if has_key(result, "observability") {
+	print("Observability:", result["observability"])
+} else {
+	print("Observability:", {})
+}

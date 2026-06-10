@@ -1,0 +1,48 @@
+test_setup {
+	from src.providers import openai_provider, deepseek_provider, openrouter_provider
+	from src.ai_sdk import create_client, create_message, chat_completion
+}
+
+func run_live_provider_smoke(provider, api_key) {
+	messages := [
+		create_message("system", "You are concise and return short outputs."),
+		create_message("user", "Return the single word READY.")
+	]
+
+	client := create_client(provider, api_key)
+	result := chat_completion(client, messages, {
+		"temperature": 0.0,
+		"max_tokens": 24,
+		"max_retries": 1,
+		"retry_delay_ms": 250,
+		"timeout": 30.0
+	})
+
+	assert_true(result["ok"])
+	assert_true(len(result["output_text"]) > 0)
+	print("Live smoke provider:", provider["name"])
+	print("Live smoke model:", result["model"])
+	print("Live smoke output:", result["output_text"])
+}
+
+test "release live smoke validates at least one configured provider" {
+	openai_api_key := env("OPENAI_API_KEY")
+	if openai_api_key != "" {
+		run_live_provider_smoke(openai_provider(), openai_api_key)
+		return
+	}
+
+	deepseek_api_key := env("DEEPSEEK_API_KEY")
+	if deepseek_api_key != "" {
+		run_live_provider_smoke(deepseek_provider(), deepseek_api_key)
+		return
+	}
+
+	openrouter_api_key := env("OPENROUTER_API_KEY")
+	if openrouter_api_key != "" {
+		run_live_provider_smoke(openrouter_provider(), openrouter_api_key)
+		return
+	}
+
+	print("No live provider keys configured. Skipping release live-provider smoke test.")
+}

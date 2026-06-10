@@ -1,0 +1,85 @@
+# Provider Extension Guide
+
+This guide explains how to add a new provider preset and validate capability behavior in the Kujo AI SDK.
+
+## 1) Add a Provider Preset
+
+Edit `src/providers.ruff` and add a new exported provider function.
+
+Required fields:
+- `name`
+- `base_url`
+- `chat_path`
+- `api_key_env`
+- `default_model`
+- `capabilities`
+
+Example shape:
+
+```ruff
+export my_provider := func() {
+	return {
+		"name": "my-provider",
+		"base_url": "https://api.example.com/v1",
+		"chat_path": "/chat/completions",
+		"api_key_env": "MY_PROVIDER_API_KEY",
+		"default_model": "my-model",
+		"capabilities": {
+			"streaming": true,
+			"tool_calls": true,
+			"json_mode": true
+		}
+	}
+}
+```
+
+## 2) Set Capabilities Correctly
+
+Capabilities are used by `chat_completion(...)` and `chat_completion_stream(...)` to gate features.
+
+- `streaming`: must be `true` only if streaming responses are supported.
+- `tool_calls`: must be `true` only if provider supports tool/function calls.
+- `json_mode`: set according to provider support.
+
+Incorrect capability flags can cause runtime contract errors or unsupported feature failures.
+
+## 3) Add Contract Tests
+
+Update `tests/sdk_contract_tests.ruff` with provider-focused tests:
+- Preset shape test (required keys exist)
+- Capability checks using `provider_supports(...)`
+- Auth error behavior (`auth_error`) when key is missing
+- Optional fixture or normalization tests when behavior differs
+
+## 4) Validate End-to-End
+
+Run:
+
+```bash
+export KUJO_BIN="${KUJO_BIN:-kujo}"
+"$KUJO_BIN" test-run --help >/dev/null
+"$KUJO_BIN" test-run tests/sdk_contract_tests.ruff
+"$KUJO_BIN" run examples/main.ruff
+```
+
+If your change affects streaming/retry behavior, also run:
+
+```bash
+"$KUJO_BIN" run scripts/stress_harness.ruff
+```
+
+## 5) README and Checklist Updates
+
+When a provider is added or capability behavior changes:
+- Update provider list in `README.md`
+- Update examples if needed
+- Add checklist/session log evidence in `docs/SDK_IMPROVEMENT_CHECKLIST.md`
+
+## Repeatable Provider Addition Checklist
+
+- [ ] Added provider export in `src/providers.ruff`
+- [ ] Included full required provider fields
+- [ ] Set accurate capability flags
+- [ ] Added/updated contract tests
+- [ ] Ran contract tests and example smoke run
+- [ ] Updated README provider/API docs

@@ -1,0 +1,2937 @@
+# Kujo AI SDK core module.
+#
+# This module provides a normalized, provider-agnostic contract for
+# OpenAI-compatible chat APIs with retries and capability checks.
+
+STATE_BACKEND_REGISTRY := {}
+
+func dict_get_or(obj, key, default_value) {
+	if type(obj) != "dict" {
+		return default_value
+	}
+	if has_key(obj, key) {
+		return obj[key]
+	}
+	return default_value
+}
+
+func provider_supports_impl(provider, capability_key) {
+	capabilities := dict_get_or(provider, "capabilities", {})
+	if type(capabilities) != "dict" {
+		return false
+	}
+	if has_key(capabilities, capability_key) {
+		return capabilities[capability_key]
+	}
+	return false
+}
+
+func create_client_impl(provider, api_key_override) {
+	config_error := ""
+	if type(provider) == "dict" {
+		provider_validation_error := dict_get_or(provider, "validation_error", "")
+		if type(provider_validation_error) == "string" {
+			config_error := provider_validation_error
+		}
+	}
+
+	api_key := api_key_override
+	if type(api_key) == "null" {
+		api_key := env(provider["api_key_env"])
+	}
+	if type(api_key) == "null" {
+		api_key := ""
+	}
+
+	return {
+		"provider": provider,
+		"api_key": api_key,
+		"config_error": config_error,
+		"transport": dict_get_or(provider, "transport", null),
+		"in_flight_requests": 0,
+		"circuit_breaker_consecutive_failures": 0,
+		"circuit_breaker_open_until_ms": 0
+	}
+}
+
+func create_message_impl(role, content) {
+	return {
+		"role": role,
+		"content": content
+	}
+}
+
+func contract_version_value() {
+	return "1.0.0"
+}
+
+func default_limits() {
+	return {
+		"temperature": 0.2,
+		"max_tokens": 400,
+		"max_retries": 2,
+		"retry_budget": 2,
+		"retry_jitter_ms": 0,
+		"retry_delay_ms": 300,
+		"max_retry_delay_ms": 4000,
+		"timeout": 45.0,
+		"connect_timeout": 10.0,
+		"read_timeout": 45.0,
+		"overall_timeout_ms": 0,
+		"deadline_ms": 0,
+		"structured_output_schema": null,
+		"structured_output_retryable": true,
+		"fallback_providers": [],
+		"circuit_breaker_enabled": false,
+		"circuit_breaker_error_threshold": 5,
+		"circuit_breaker_cooldown_ms": 15000,
+		"circuit_breaker_half_open_enabled": true,
+		"circuit_breaker_half_open_max_retries": 0,
+		"state_backend": null,
+		"state_namespace": "",
+		"max_prompt_characters": 20000,
+		"max_tools_per_request": 32,
+		"max_in_flight_requests": 4,
+		"queue_wait_timeout_ms": 0,
+		"queue_poll_interval_ms": 25,
+		"max_total_tokens_per_request": 0,
+		"rolling_token_budget_tokens": 0,
+		"rolling_cost_budget_cents": 0.0,
+		"estimated_cost_per_1k_tokens_cents": 0.0,
+		"trace_id": "",
+		"endpoint_allowlist_enabled": false,
+		"endpoint_allowlist_hosts": []
+	}
+}
+
+func resolve_option_with_default(options, key, default_value) {
+	if type(options) != "dict" {
+		return default_value
+	}
+	if has_key(options, key) {
+		return options[key]
+	}
+	return default_value
+}
+
+func resolve_chat_options(client, options) {
+	limits := default_limits()
+	resolved := {
+		"model": client["provider"]["default_model"],
+		"temperature": limits["temperature"],
+		"max_tokens": limits["max_tokens"],
+		"stream": false,
+		"max_retries": limits["max_retries"],
+		"retry_budget": limits["retry_budget"],
+		"retry_jitter_ms": limits["retry_jitter_ms"],
+		"retry_delay_ms": limits["retry_delay_ms"],
+		"max_retry_delay_ms": limits["max_retry_delay_ms"],
+		"timeout": limits["timeout"],
+		"connect_timeout": limits["connect_timeout"],
+		"read_timeout": limits["read_timeout"],
+		"overall_timeout_ms": limits["overall_timeout_ms"],
+		"deadline_ms": limits["deadline_ms"],
+		"structured_output_schema": limits["structured_output_schema"],
+		"structured_output_retryable": limits["structured_output_retryable"],
+		"fallback_providers": limits["fallback_providers"],
+		"circuit_breaker_enabled": limits["circuit_breaker_enabled"],
+		"circuit_breaker_error_threshold": limits["circuit_breaker_error_threshold"],
+		"circuit_breaker_cooldown_ms": limits["circuit_breaker_cooldown_ms"],
+		"circuit_breaker_half_open_enabled": limits["circuit_breaker_half_open_enabled"],
+		"circuit_breaker_half_open_max_retries": limits["circuit_breaker_half_open_max_retries"],
+		"state_backend": null,
+		"state_namespace": "",
+		"max_prompt_characters": limits["max_prompt_characters"],
+		"max_tools_per_request": limits["max_tools_per_request"],
+		"max_in_flight_requests": limits["max_in_flight_requests"],
+		"queue_wait_timeout_ms": limits["queue_wait_timeout_ms"],
+		"queue_poll_interval_ms": limits["queue_poll_interval_ms"],
+		"max_total_tokens_per_request": limits["max_total_tokens_per_request"],
+		"rolling_token_budget_tokens": limits["rolling_token_budget_tokens"],
+		"rolling_cost_budget_cents": limits["rolling_cost_budget_cents"],
+		"estimated_cost_per_1k_tokens_cents": limits["estimated_cost_per_1k_tokens_cents"],
+		"trace_id": limits["trace_id"],
+		"offline_fixture": false,
+		"allow_unsafe_header_override": false,
+		"transport": null,
+		"on_request_start": null,
+		"on_request_complete": null,
+		"on_retry": null,
+		"endpoint_allowlist_enabled": limits["endpoint_allowlist_enabled"],
+		"endpoint_allowlist_hosts": limits["endpoint_allowlist_hosts"]
+	}
+
+	resolved["model"] := resolve_option_with_default(options, "model", resolved["model"])
+	resolved["temperature"] := resolve_option_with_default(options, "temperature", resolved["temperature"])
+	resolved["max_tokens"] := resolve_option_with_default(options, "max_tokens", resolved["max_tokens"])
+	resolved["stream"] := resolve_option_with_default(options, "stream", resolved["stream"])
+	resolved["max_retries"] := resolve_option_with_default(options, "max_retries", resolved["max_retries"])
+	resolved["retry_budget"] := resolve_option_with_default(options, "retry_budget", resolved["retry_budget"])
+	resolved["retry_jitter_ms"] := resolve_option_with_default(options, "retry_jitter_ms", resolved["retry_jitter_ms"])
+	resolved["retry_delay_ms"] := resolve_option_with_default(options, "retry_delay_ms", resolved["retry_delay_ms"])
+	resolved["max_retry_delay_ms"] := resolve_option_with_default(options, "max_retry_delay_ms", resolved["max_retry_delay_ms"])
+	resolved["timeout"] := resolve_option_with_default(options, "timeout", resolved["timeout"])
+	resolved["connect_timeout"] := resolve_option_with_default(options, "connect_timeout", resolved["connect_timeout"])
+	resolved["read_timeout"] := resolve_option_with_default(options, "read_timeout", resolved["read_timeout"])
+	resolved["overall_timeout_ms"] := resolve_option_with_default(options, "overall_timeout_ms", resolved["overall_timeout_ms"])
+	resolved["deadline_ms"] := resolve_option_with_default(options, "deadline_ms", resolved["deadline_ms"])
+	resolved["structured_output_schema"] := resolve_option_with_default(options, "structured_output_schema", resolved["structured_output_schema"])
+	resolved["structured_output_retryable"] := resolve_option_with_default(options, "structured_output_retryable", resolved["structured_output_retryable"])
+	resolved["fallback_providers"] := resolve_option_with_default(options, "fallback_providers", resolved["fallback_providers"])
+	resolved["circuit_breaker_enabled"] := resolve_option_with_default(options, "circuit_breaker_enabled", resolved["circuit_breaker_enabled"])
+	resolved["circuit_breaker_error_threshold"] := resolve_option_with_default(options, "circuit_breaker_error_threshold", resolved["circuit_breaker_error_threshold"])
+	resolved["circuit_breaker_cooldown_ms"] := resolve_option_with_default(options, "circuit_breaker_cooldown_ms", resolved["circuit_breaker_cooldown_ms"])
+	resolved["circuit_breaker_half_open_enabled"] := resolve_option_with_default(options, "circuit_breaker_half_open_enabled", resolved["circuit_breaker_half_open_enabled"])
+	resolved["circuit_breaker_half_open_max_retries"] := resolve_option_with_default(options, "circuit_breaker_half_open_max_retries", resolved["circuit_breaker_half_open_max_retries"])
+	resolved["state_backend"] := resolve_option_with_default(options, "state_backend", resolved["state_backend"])
+	resolved["state_namespace"] := resolve_option_with_default(options, "state_namespace", resolved["state_namespace"])
+	resolved["max_prompt_characters"] := resolve_option_with_default(options, "max_prompt_characters", resolved["max_prompt_characters"])
+	resolved["max_tools_per_request"] := resolve_option_with_default(options, "max_tools_per_request", resolved["max_tools_per_request"])
+	resolved["max_in_flight_requests"] := resolve_option_with_default(options, "max_in_flight_requests", resolved["max_in_flight_requests"])
+	resolved["queue_wait_timeout_ms"] := resolve_option_with_default(options, "queue_wait_timeout_ms", resolved["queue_wait_timeout_ms"])
+	resolved["queue_poll_interval_ms"] := resolve_option_with_default(options, "queue_poll_interval_ms", resolved["queue_poll_interval_ms"])
+	resolved["max_total_tokens_per_request"] := resolve_option_with_default(options, "max_total_tokens_per_request", resolved["max_total_tokens_per_request"])
+	resolved["rolling_token_budget_tokens"] := resolve_option_with_default(options, "rolling_token_budget_tokens", resolved["rolling_token_budget_tokens"])
+	resolved["rolling_cost_budget_cents"] := resolve_option_with_default(options, "rolling_cost_budget_cents", resolved["rolling_cost_budget_cents"])
+	resolved["estimated_cost_per_1k_tokens_cents"] := resolve_option_with_default(options, "estimated_cost_per_1k_tokens_cents", resolved["estimated_cost_per_1k_tokens_cents"])
+	resolved["trace_id"] := resolve_option_with_default(options, "trace_id", resolved["trace_id"])
+	resolved["offline_fixture"] := resolve_option_with_default(options, "offline_fixture", resolved["offline_fixture"])
+	resolved["allow_unsafe_header_override"] := resolve_option_with_default(options, "allow_unsafe_header_override", resolved["allow_unsafe_header_override"])
+	resolved["transport"] := resolve_option_with_default(options, "transport", resolved["transport"])
+	resolved["on_request_start"] := resolve_option_with_default(options, "on_request_start", resolved["on_request_start"])
+	resolved["on_request_complete"] := resolve_option_with_default(options, "on_request_complete", resolved["on_request_complete"])
+	resolved["on_retry"] := resolve_option_with_default(options, "on_retry", resolved["on_retry"])
+	resolved["endpoint_allowlist_enabled"] := resolve_option_with_default(options, "endpoint_allowlist_enabled", resolved["endpoint_allowlist_enabled"])
+	resolved["endpoint_allowlist_hosts"] := resolve_option_with_default(options, "endpoint_allowlist_hosts", resolved["endpoint_allowlist_hosts"])
+
+	return resolved
+}
+
+func resolve_transport_with_resolved(client, resolved_options) {
+	transport := dict_get_or(resolved_options, "transport", null)
+	if type(transport) == "function" {
+		return transport
+	}
+
+	client_transport := dict_get_or(client, "transport", null)
+	if type(client_transport) == "function" {
+		return client_transport
+	}
+
+	return http_request
+}
+
+func resolve_transport(client, options) {
+	resolved_options := resolve_chat_options(client, options)
+	return resolve_transport_with_resolved(client, resolved_options)
+}
+
+func build_chat_payload_with_resolved(client, messages, options, resolved) {
+	payload := {
+		"model": resolved["model"],
+		"messages": messages,
+		"temperature": resolved["temperature"],
+		"max_tokens": resolved["max_tokens"],
+		"stream": resolved["stream"]
+	}
+
+	if type(options) == "dict" {
+		if has_key(options, "tools") {
+			payload["tools"] := options["tools"]
+		}
+		if has_key(options, "response_format") {
+			payload["response_format"] := options["response_format"]
+		}
+	}
+
+	return payload
+}
+
+func build_chat_payload_impl(client, messages, options) {
+	resolved := resolve_chat_options(client, options)
+	return build_chat_payload_with_resolved(client, messages, options, resolved)
+}
+
+func is_sensitive_key_name(key_name) {
+	if key_name == "authorization" || key_name == "Authorization" {
+		return true
+	}
+	if key_name == "api_key" || key_name == "apiKey" || key_name == "x-api-key" || key_name == "X-API-Key" {
+		return true
+	}
+	if key_name == "api-key" || key_name == "apikey" {
+		return true
+	}
+	if key_name == "client_secret" || key_name == "clientSecret" {
+		return true
+	}
+	if key_name == "private_key" || key_name == "privateKey" {
+		return true
+	}
+	if key_name == "id_token" || key_name == "idToken" || key_name == "session_token" || key_name == "sessionToken" {
+		return true
+	}
+	if key_name == "jwt" || key_name == "jwt_token" || key_name == "credentials" || key_name == "credential" {
+		return true
+	}
+	if key_name == "token" || key_name == "access_token" || key_name == "refresh_token" {
+		return true
+	}
+	if key_name == "password" || key_name == "secret" {
+		return true
+	}
+	if contains(key_name, "apiKey") || contains(key_name, "api_key") || contains(key_name, "privateKey") || contains(key_name, "private_key") {
+		return true
+	}
+	if contains(key_name, "Token") || contains(key_name, "Secret") || contains(key_name, "Password") || contains(key_name, "Credential") {
+		return true
+	}
+	if contains(key_name, "token") || contains(key_name, "secret") || contains(key_name, "password") {
+		return true
+	}
+	if contains(key_name, "credential") {
+		return true
+	}
+	return false
+}
+
+func redact_sensitive_string(value) {
+	if starts_with(value, "Bearer ") {
+		return "Bearer [REDACTED]"
+	}
+	if contains(value, "-----BEGIN ") {
+		if contains(value, "PRIVATE KEY-----") {
+			return "[REDACTED]"
+		}
+	}
+	if contains(value, "sk-") {
+		return "[REDACTED]"
+	}
+	if contains(value, "ghp_") || contains(value, "xoxb-") || contains(value, "AIza") {
+		return "[REDACTED]"
+	}
+	return value
+}
+
+func redact_sensitive_payload(raw_value) {
+	if type(raw_value) == "dict" {
+		redacted := {}
+		for key in keys(raw_value) {
+			if is_sensitive_key_name(key) {
+				redacted[key] := "[REDACTED]"
+			} else {
+				redacted[key] := redact_sensitive_payload(raw_value[key])
+			}
+		}
+		return redacted
+	}
+
+	if type(raw_value) == "array" {
+		redacted_items := []
+		i := 0
+		while i < len(raw_value) {
+			redacted_items := push(redacted_items, redact_sensitive_payload(raw_value[i]))
+			i := i + 1
+		}
+		return redacted_items
+	}
+
+	if type(raw_value) == "string" {
+		return redact_sensitive_string(raw_value)
+	}
+
+	return raw_value
+}
+
+func standard_error_response_impl(client, error_code, message, status_code, raw, retryable) {
+	return {
+		"ok": false,
+		"provider": client["provider"]["name"],
+		"contract_version": contract_version_value(),
+		"error": {
+			"code": error_code,
+			"message": message,
+			"retryable": retryable
+		},
+		"status_code": status_code,
+		"normalized_at": current_timestamp(),
+		"raw": redact_sensitive_payload(raw)
+	}
+}
+
+func provider_host_from_base_url(base_url) {
+	if type(base_url) != "string" {
+		return ""
+	}
+
+	parts := split(base_url, "/")
+	if len(parts) < 3 {
+		return ""
+	}
+
+	host_port := trim(parts[2])
+	if host_port == "" {
+		return ""
+	}
+
+	host_parts := split(host_port, ":")
+	if len(host_parts) == 0 {
+		return ""
+	}
+
+	return trim(host_parts[0])
+}
+
+func is_endpoint_host_allowlisted(provider_host, allowlist_hosts) {
+	if provider_host == "" {
+		return false
+	}
+	if type(allowlist_hosts) != "array" {
+		return false
+	}
+
+	i := 0
+	while i < len(allowlist_hosts) {
+		candidate := allowlist_hosts[i]
+		if type(candidate) == "string" {
+			if trim(candidate) == provider_host {
+				return true
+			}
+		}
+		i := i + 1
+	}
+
+	return false
+}
+
+func enforce_endpoint_allowlist_policy(client, resolved_options) {
+	allowlist_enabled := dict_get_or(resolved_options, "endpoint_allowlist_enabled", false)
+	if !allowlist_enabled {
+		return null
+	}
+
+	allowlist_hosts := dict_get_or(resolved_options, "endpoint_allowlist_hosts", [])
+	provider_base_url := dict_get_or(client["provider"], "base_url", "")
+	provider_host := provider_host_from_base_url(provider_base_url)
+
+	if is_endpoint_host_allowlisted(provider_host, allowlist_hosts) {
+		return null
+	}
+
+	if provider_host == "" {
+		return standard_error_response_impl(
+			client,
+			"endpoint_policy_violation",
+			"Endpoint allowlist policy could not parse provider host.",
+			403,
+			{
+				"base_url": provider_base_url,
+				"allowlist_hosts": allowlist_hosts
+			},
+			false
+		)
+	}
+
+	return standard_error_response_impl(
+		client,
+		"endpoint_policy_violation",
+		"Provider endpoint host is not in endpoint allowlist policy.",
+		403,
+		{
+			"base_url": provider_base_url,
+			"host": provider_host,
+			"allowlist_hosts": allowlist_hosts
+		},
+		false
+	)
+}
+
+func normalize_provider_error_payload(client, status_code, data) {
+	err_obj := {}
+	if type(data) == "dict" {
+		err_obj := dict_get_or(data, "error", {})
+	}
+	err_message := dict_get_or(err_obj, "message", "Provider returned an error")
+	response := standard_error_response_impl(
+		client,
+		"provider_error",
+		err_message,
+		status_code,
+		data,
+		false
+	)
+	normalized_error := dict_get_or(response, "error", {})
+
+	err_type := dict_get_or(err_obj, "type", "")
+	err_param := dict_get_or(err_obj, "param", "")
+	provider_code := dict_get_or(err_obj, "code", "")
+
+	if err_type != "" {
+		normalized_error["type"] := err_type
+	}
+	if err_param != "" {
+		normalized_error["param"] := err_param
+	}
+	if provider_code != "" {
+		normalized_error["provider_code"] := provider_code
+	}
+	response["error"] := normalized_error
+
+	return response
+}
+
+func fixture_response_impl(client) {
+	return {
+		"ok": true,
+		"provider": client["provider"]["name"],
+		"contract_version": contract_version_value(),
+		"request_id": "chatcmpl-ruff-fixture-1",
+		"model": client["provider"]["default_model"],
+		"output_text": "Standardized AI SDK responses reduce integration complexity and speed up development.",
+		"finish_reason": "stop",
+		"tool_calls": [],
+		"usage": {
+			"input_tokens": 12,
+			"output_tokens": 8,
+			"total_tokens": 20
+		},
+		"status_code": 200,
+		"normalized_at": current_timestamp(),
+		"raw": {
+			"id": "chatcmpl-ruff-fixture-1",
+			"model": client["provider"]["default_model"]
+		}
+	}
+}
+
+func parse_json_safe(text) {
+	if text == "" {
+		return {
+			"ok": false,
+			"data": null,
+			"error": "empty body"
+		}
+	}
+
+	parsed := null
+	parse_error := null
+	try {
+		parsed := parse_json(text)
+	} except err {
+		parse_error := err
+	}
+
+	if type(parse_error) != "null" {
+		return {
+			"ok": false,
+			"data": null,
+			"error": to_string(parse_error)
+		}
+	}
+
+	return {
+		"ok": true,
+		"data": parsed,
+		"error": ""
+	}
+}
+
+func normalize_success_response(client, status_code, data, fallback_model) {
+	request_id := dict_get_or(data, "id", "")
+	model := dict_get_or(data, "model", fallback_model)
+	output_text := ""
+	finish_reason := ""
+	tool_calls := []
+
+	choices := dict_get_or(data, "choices", [])
+	if type(choices) == "array" {
+		if len(choices) > 0 {
+			first_choice := choices[0]
+			if type(first_choice) == "dict" {
+				output_text := extract_choice_content_text(first_choice)
+				tool_calls := extract_choice_tool_calls(first_choice)
+
+				finish_reason := dict_get_or(first_choice, "finish_reason", "")
+			}
+		}
+	}
+
+	usage := {
+		"input_tokens": 0,
+		"output_tokens": 0,
+		"total_tokens": 0
+	}
+	raw_usage := dict_get_or(data, "usage", null)
+	usage := normalize_usage_fields(raw_usage, usage)
+
+	return {
+		"ok": true,
+		"provider": client["provider"]["name"],
+		"contract_version": contract_version_value(),
+		"request_id": request_id,
+		"model": model,
+		"output_text": output_text,
+		"finish_reason": finish_reason,
+		"tool_calls": tool_calls,
+		"usage": usage,
+		"status_code": status_code,
+		"normalized_at": current_timestamp(),
+		"raw": redact_sensitive_payload(data)
+	}
+}
+
+func normalize_usage_fields(raw_usage, defaults) {
+	usage := {
+		"input_tokens": dict_get_or(defaults, "input_tokens", 0),
+		"output_tokens": dict_get_or(defaults, "output_tokens", 0),
+		"total_tokens": dict_get_or(defaults, "total_tokens", 0)
+	}
+
+	if type(raw_usage) != "dict" {
+		return usage
+	}
+
+	has_input := has_key(raw_usage, "prompt_tokens") || has_key(raw_usage, "input_tokens")
+	has_output := has_key(raw_usage, "completion_tokens") || has_key(raw_usage, "output_tokens")
+	has_total := has_key(raw_usage, "total_tokens")
+
+	if has_input {
+		usage["input_tokens"] := dict_get_or(raw_usage, "prompt_tokens", dict_get_or(raw_usage, "input_tokens", usage["input_tokens"]))
+	}
+	if has_output {
+		usage["output_tokens"] := dict_get_or(raw_usage, "completion_tokens", dict_get_or(raw_usage, "output_tokens", usage["output_tokens"]))
+	}
+	if has_total {
+		usage["total_tokens"] := dict_get_or(raw_usage, "total_tokens", usage["total_tokens"])
+	} else {
+		usage["total_tokens"] := usage["input_tokens"] + usage["output_tokens"]
+	}
+
+	return usage
+}
+
+func extract_text_from_content_variant(content) {
+	if type(content) == "string" {
+		return content
+	}
+
+	if type(content) == "dict" {
+		if has_key(content, "text") {
+			text_value := dict_get_or(content, "text", "")
+			if type(text_value) == "string" {
+				return text_value
+			}
+			if type(text_value) == "dict" {
+				return dict_get_or(text_value, "value", "")
+			}
+		}
+		if has_key(content, "value") {
+			value_text := dict_get_or(content, "value", "")
+			if type(value_text) == "string" {
+				return value_text
+			}
+		}
+		if has_key(content, "content") {
+			return extract_text_from_content_variant(dict_get_or(content, "content", ""))
+		}
+		return ""
+	}
+
+	if type(content) == "array" {
+		joined := ""
+		i := 0
+		while i < len(content) {
+			part := extract_text_from_content_variant(content[i])
+			if type(part) == "string" {
+				joined := joined + part
+			}
+			i := i + 1
+		}
+		return joined
+	}
+
+	return ""
+}
+
+func extract_choice_content_text(choice) {
+	message := dict_get_or(choice, "message", null)
+	if type(message) == "dict" {
+		message_content := dict_get_or(message, "content", "")
+		message_text := extract_text_from_content_variant(message_content)
+		if message_text != "" {
+			return message_text
+		}
+	}
+
+	choice_text := extract_text_from_content_variant(dict_get_or(choice, "text", ""))
+	if choice_text != "" {
+		return choice_text
+	}
+
+	return extract_text_from_content_variant(dict_get_or(choice, "content", ""))
+}
+
+func extract_choice_tool_calls(choice) {
+	message := dict_get_or(choice, "message", null)
+	if type(message) == "dict" {
+		return dict_get_or(message, "tool_calls", [])
+	}
+	return []
+}
+
+func extract_stream_delta_text(choice) {
+	delta := dict_get_or(choice, "delta", null)
+	if type(delta) != "dict" {
+		return ""
+	}
+	return extract_text_from_content_variant(dict_get_or(delta, "content", ""))
+}
+
+func extract_stream_delta_tool_calls(choice) {
+	delta := dict_get_or(choice, "delta", null)
+	if type(delta) != "dict" {
+		return []
+	}
+	return dict_get_or(delta, "tool_calls", [])
+}
+
+func message_character_count(messages) {
+	if type(messages) != "array" {
+		return 0
+	}
+
+	total_chars := 0
+	i := 0
+	while i < len(messages) {
+		item := messages[i]
+		if type(item) == "dict" {
+			content := dict_get_or(item, "content", "")
+			content_text := extract_text_from_content_variant(content)
+			if content_text == "" {
+				content_text := to_string(content)
+			}
+			total_chars := total_chars + len(content_text)
+		} else {
+			total_chars := total_chars + len(to_string(item))
+		}
+		i := i + 1
+	}
+
+	return total_chars
+}
+
+func budget_error_response(client, message, payload, prompt_characters) {
+	return standard_error_response_impl(
+		client,
+		"request_budget_exceeded",
+		message,
+		0,
+		{
+			"prompt_characters": prompt_characters,
+			"payload": payload
+		},
+		false
+	)
+}
+
+func governance_error_response(client, message, details) {
+	return standard_error_response_impl(
+		client,
+		"governance_budget_exceeded",
+		message,
+		429,
+		details,
+		false
+	)
+}
+
+func estimate_prompt_tokens(messages) {
+	prompt_characters := message_character_count(messages)
+	if prompt_characters <= 0 {
+		return 0
+	}
+	tokens := prompt_characters / 4
+	if prompt_characters % 4 != 0 {
+		tokens := tokens + 1
+	}
+	return tokens
+}
+
+func planned_request_total_tokens(messages, payload, resolved_options) {
+	max_tokens := dict_get_or(payload, "max_tokens", dict_get_or(resolved_options, "max_tokens", 0))
+	if max_tokens < 0 {
+		max_tokens := 0
+	}
+	prompt_tokens := estimate_prompt_tokens(messages)
+	return prompt_tokens + max_tokens
+}
+
+func load_governance_token_usage(client, resolved_options) {
+	local_value := dict_get_or(client, "governance_tokens_used", 0)
+	key := state_backend_key(client, resolved_options, "governance_tokens_used")
+	value := state_backend_get(resolved_options, key, local_value)
+	if type(value) != "int" {
+		return local_value
+	}
+	return value
+}
+
+func persist_governance_token_usage(client, resolved_options, value) {
+	client["governance_tokens_used"] := value
+	key := state_backend_key(client, resolved_options, "governance_tokens_used")
+	state_backend_set(resolved_options, key, value)
+}
+
+func load_governance_cost_usage(client, resolved_options) {
+	local_value := dict_get_or(client, "governance_cost_cents_used", 0.0)
+	key := state_backend_key(client, resolved_options, "governance_cost_cents_used")
+	value := state_backend_get(resolved_options, key, local_value)
+	if type(value) == "int" {
+		return value * 1.0
+	}
+	if type(value) != "float" {
+		return local_value
+	}
+	return value
+}
+
+func persist_governance_cost_usage(client, resolved_options, value) {
+	client["governance_cost_cents_used"] := value
+	key := state_backend_key(client, resolved_options, "governance_cost_cents_used")
+	state_backend_set(resolved_options, key, value)
+}
+
+func enforce_governance_preflight(client, messages, payload, resolved_options) {
+	max_total_tokens_per_request := dict_get_or(resolved_options, "max_total_tokens_per_request", 0)
+	planned_tokens := planned_request_total_tokens(messages, payload, resolved_options)
+	if max_total_tokens_per_request > 0 {
+		if planned_tokens > max_total_tokens_per_request {
+			return governance_error_response(
+				client,
+				"Planned request token usage exceeds per-request governance budget.",
+				{
+					"budget_type": "per_request_tokens",
+					"planned_tokens": planned_tokens,
+					"max_total_tokens_per_request": max_total_tokens_per_request
+				}
+			)
+		}
+	}
+
+	rolling_token_budget := dict_get_or(resolved_options, "rolling_token_budget_tokens", 0)
+	if rolling_token_budget > 0 {
+		tokens_used := load_governance_token_usage(client, resolved_options)
+		if tokens_used >= rolling_token_budget {
+			return governance_error_response(
+				client,
+				"Rolling token governance budget exceeded.",
+				{
+					"budget_type": "rolling_tokens",
+					"used_tokens": tokens_used,
+					"rolling_token_budget_tokens": rolling_token_budget
+				}
+			)
+		}
+	}
+
+	rolling_cost_budget_cents := dict_get_or(resolved_options, "rolling_cost_budget_cents", 0.0)
+	if rolling_cost_budget_cents > 0 {
+		cost_used := load_governance_cost_usage(client, resolved_options)
+		if cost_used >= rolling_cost_budget_cents {
+			return governance_error_response(
+				client,
+				"Rolling cost governance budget exceeded.",
+				{
+					"budget_type": "rolling_cost",
+					"used_cost_cents": cost_used,
+					"rolling_cost_budget_cents": rolling_cost_budget_cents
+				}
+			)
+		}
+	}
+
+	return null
+}
+
+func apply_governance_post_response(client, result, messages, payload, resolved_options) {
+	if !result["ok"] {
+		return result
+	}
+
+	rolling_token_budget := dict_get_or(resolved_options, "rolling_token_budget_tokens", 0)
+	rolling_cost_budget_cents := dict_get_or(resolved_options, "rolling_cost_budget_cents", 0.0)
+	cost_per_1k_tokens_cents := dict_get_or(resolved_options, "estimated_cost_per_1k_tokens_cents", 0.0)
+	if rolling_token_budget <= 0 && rolling_cost_budget_cents <= 0 {
+		return result
+	}
+
+	usage := dict_get_or(result, "usage", {})
+	request_tokens := dict_get_or(usage, "total_tokens", 0)
+	if request_tokens <= 0 {
+		request_tokens := planned_request_total_tokens(messages, payload, resolved_options)
+	}
+
+	tokens_used := load_governance_token_usage(client, resolved_options)
+	projected_tokens := tokens_used + request_tokens
+	if rolling_token_budget > 0 {
+		if projected_tokens > rolling_token_budget {
+			return governance_error_response(
+				client,
+				"Rolling token governance budget exceeded.",
+				{
+					"budget_type": "rolling_tokens",
+					"used_tokens": tokens_used,
+					"request_tokens": request_tokens,
+					"projected_tokens": projected_tokens,
+					"rolling_token_budget_tokens": rolling_token_budget
+				}
+			)
+		}
+	}
+
+	cost_used := load_governance_cost_usage(client, resolved_options)
+	request_cost_cents := 0.0
+	if cost_per_1k_tokens_cents > 0 {
+		request_cost_cents := (request_tokens * cost_per_1k_tokens_cents) / 1000.0
+	}
+	projected_cost := cost_used + request_cost_cents
+	if rolling_cost_budget_cents > 0 {
+		if projected_cost > rolling_cost_budget_cents {
+			return governance_error_response(
+				client,
+				"Rolling cost governance budget exceeded.",
+				{
+					"budget_type": "rolling_cost",
+					"used_cost_cents": cost_used,
+					"request_cost_cents": request_cost_cents,
+					"projected_cost_cents": projected_cost,
+					"rolling_cost_budget_cents": rolling_cost_budget_cents
+				}
+			)
+		}
+	}
+
+	persist_governance_token_usage(client, resolved_options, projected_tokens)
+	persist_governance_cost_usage(client, resolved_options, projected_cost)
+	return result
+}
+
+func enforce_request_budgets(client, messages, payload, resolved_options) {
+	prompt_characters := message_character_count(messages)
+	max_prompt_characters := dict_get_or(resolved_options, "max_prompt_characters", 20000)
+	if prompt_characters > max_prompt_characters {
+		return budget_error_response(
+			client,
+			"Prompt character budget exceeded. Reduce message size or raise max_prompt_characters.",
+			payload,
+			prompt_characters
+		)
+	}
+
+	if has_key(payload, "tools") {
+		tools := dict_get_or(payload, "tools", [])
+		if type(tools) == "array" {
+			max_tools := dict_get_or(resolved_options, "max_tools_per_request", 32)
+			if len(tools) > max_tools {
+				return budget_error_response(
+					client,
+					"Tool budget exceeded. Reduce tools array size or raise max_tools_per_request.",
+					payload,
+					prompt_characters
+				)
+			}
+		}
+	}
+
+	governance_error := enforce_governance_preflight(client, messages, payload, resolved_options)
+	if type(governance_error) == "dict" {
+		return governance_error
+	}
+
+	return null
+}
+
+func normalize_stream_success_response(client, status_code, stream_events, fallback_model) {
+	request_id := ""
+	model := fallback_model
+	output_text := ""
+	finish_reason := ""
+	tool_calls := []
+	usage := {
+		"input_tokens": 0,
+		"output_tokens": 0,
+		"total_tokens": 0
+	}
+
+	i := 0
+	while i < len(stream_events) {
+		event := stream_events[i]
+		if type(event) == "dict" {
+			if request_id == "" {
+				request_id := dict_get_or(event, "id", "")
+			}
+			if model == fallback_model {
+				event_model := dict_get_or(event, "model", "")
+				if event_model != "" {
+					model := event_model
+				}
+			}
+
+			choices := dict_get_or(event, "choices", [])
+			if type(choices) == "array" {
+				if len(choices) > 0 {
+					first_choice := choices[0]
+					if type(first_choice) == "dict" {
+						delta_text := extract_stream_delta_text(first_choice)
+						if delta_text != "" {
+							output_text := output_text + delta_text
+						}
+						delta_tool_calls := extract_stream_delta_tool_calls(first_choice)
+						if type(delta_tool_calls) == "array" {
+							if len(delta_tool_calls) > 0 {
+								tool_calls := delta_tool_calls
+							}
+						}
+
+						candidate_finish_reason := dict_get_or(first_choice, "finish_reason", "")
+						if candidate_finish_reason != "" {
+							finish_reason := candidate_finish_reason
+						}
+					}
+				}
+			}
+
+			raw_usage := dict_get_or(event, "usage", null)
+			usage := normalize_usage_fields(raw_usage, usage)
+		}
+
+		i := i + 1
+	}
+
+	if finish_reason == "" {
+		finish_reason := "stop"
+	}
+
+	raw := {
+		"stream_mode": true,
+		"stream_events": stream_events,
+		"model": model,
+		"id": request_id
+	}
+
+	return {
+		"ok": true,
+		"provider": client["provider"]["name"],
+		"contract_version": contract_version_value(),
+		"request_id": request_id,
+		"model": model,
+		"output_text": output_text,
+		"finish_reason": finish_reason,
+		"tool_calls": tool_calls,
+		"usage": usage,
+		"status_code": status_code,
+		"normalized_at": current_timestamp(),
+		"raw": raw
+	}
+}
+
+func build_embeddings_payload_with_resolved(client, input_value, options, resolved) {
+	payload := {
+		"model": resolved["model"],
+		"input": input_value
+	}
+
+	if type(options) == "dict" {
+		if has_key(options, "dimensions") {
+			payload["dimensions"] := options["dimensions"]
+		}
+	}
+
+	return payload
+}
+
+func build_embeddings_payload_impl(client, input_value, options) {
+	resolved := resolve_chat_options(client, options)
+	return build_embeddings_payload_with_resolved(client, input_value, options, resolved)
+}
+
+func embeddings_input_character_count(input_value) {
+	if type(input_value) == "string" {
+		return len(input_value)
+	}
+
+	if type(input_value) == "array" {
+		total_chars := 0
+		i := 0
+		while i < len(input_value) {
+			total_chars := total_chars + embeddings_input_character_count(input_value[i])
+			i := i + 1
+		}
+		return total_chars
+	}
+
+	return len(to_string(input_value))
+}
+
+func finalize_embeddings_result(result, start_count, complete_count, retry_count) {
+	previous_observability := dict_get_or(result, "observability", {})
+	observability := {
+		"start_count": start_count,
+		"complete_count": complete_count,
+		"retry_count": retry_count
+	}
+	if type(previous_observability) == "dict" {
+		if has_key(previous_observability, "trace_id") {
+			observability["trace_id"] := previous_observability["trace_id"]
+		}
+		if has_key(previous_observability, "request_id") {
+			observability["request_id"] := previous_observability["request_id"]
+		}
+		if has_key(previous_observability, "started_at") {
+			observability["started_at"] := previous_observability["started_at"]
+		}
+		if has_key(previous_observability, "finished_at") {
+			observability["finished_at"] := previous_observability["finished_at"]
+		}
+		if has_key(previous_observability, "duration_ms") {
+			observability["duration_ms"] := previous_observability["duration_ms"]
+		}
+	}
+	result["observability"] := observability
+	return result
+}
+
+func fixture_embeddings_response_impl(client, payload) {
+	model := dict_get_or(payload, "model", client["provider"]["default_model"])
+	return {
+		"ok": true,
+		"provider": client["provider"]["name"],
+		"contract_version": contract_version_value(),
+		"model": model,
+		"embeddings": [
+			{
+				"index": 0,
+				"vector": [0.01, 0.02, 0.03, 0.04]
+			}
+		],
+		"usage": {
+			"input_tokens": 4,
+			"total_tokens": 4
+		},
+		"status_code": 200,
+		"normalized_at": current_timestamp(),
+		"raw": {
+			"object": "list",
+			"model": model
+		}
+	}
+}
+
+func normalize_embeddings_success_response(client, status_code, data, fallback_model) {
+	model := dict_get_or(data, "model", fallback_model)
+	embeddings := []
+
+	raw_data := dict_get_or(data, "data", [])
+	if type(raw_data) == "array" {
+		i := 0
+		while i < len(raw_data) {
+			item := raw_data[i]
+			if type(item) == "dict" {
+				embeddings := push(embeddings, {
+					"index": dict_get_or(item, "index", i),
+					"vector": dict_get_or(item, "embedding", [])
+				})
+			}
+			i := i + 1
+		}
+	}
+
+	raw_usage := dict_get_or(data, "usage", {})
+	input_tokens := dict_get_or(raw_usage, "prompt_tokens", dict_get_or(raw_usage, "input_tokens", 0))
+	total_tokens := dict_get_or(raw_usage, "total_tokens", input_tokens)
+
+	return {
+		"ok": true,
+		"provider": client["provider"]["name"],
+		"contract_version": contract_version_value(),
+		"model": model,
+		"embeddings": embeddings,
+		"usage": {
+			"input_tokens": input_tokens,
+			"total_tokens": total_tokens
+		},
+		"status_code": status_code,
+		"normalized_at": current_timestamp(),
+		"raw": redact_sensitive_payload(data)
+	}
+}
+
+func build_embeddings_request_context(client, payload, options, resolved_options) {
+	headers := {
+		"Authorization": "Bearer " + client["api_key"],
+		"Content-Type": "application/json"
+	}
+	extra_headers := null
+	allow_protected_header_override := false
+	if type(options) == "dict" {
+		extra_headers := dict_get_or(options, "headers", null)
+		allow_protected_header_override := resolved_options["allow_unsafe_header_override"]
+	}
+	headers := merge_headers_with_policy(headers, extra_headers, allow_protected_header_override)
+
+	embeddings_path := dict_get_or(client["provider"], "embeddings_path", "/embeddings")
+	url := client["provider"]["base_url"] + embeddings_path
+
+	return {
+		"headers": headers,
+		"url": url,
+		"timeout": resolved_options["timeout"],
+		"connect_timeout": resolved_options["connect_timeout"],
+		"read_timeout": resolved_options["read_timeout"],
+		"body": to_json(payload),
+		"transport": resolve_transport_with_resolved(client, resolved_options)
+	}
+}
+
+func execute_embeddings_request_once(client, payload, resolved_options, attempt, deadline_ms, trace_id, request_context) {
+	started_at := current_timestamp()
+	request_id := trace_id + "-attempt-" + to_string(attempt)
+
+	start_hook := dict_get_or(resolved_options, "on_request_start", null)
+	if type(start_hook) == "function" {
+		event := {
+			"operation": "embeddings",
+			"attempt": attempt,
+			"provider": client["provider"]["name"],
+			"url": request_context["url"],
+			"started_at": started_at,
+			"trace_id": trace_id,
+			"request_id": request_id
+		}
+		emit_hook_safe(start_hook, event)
+	}
+
+	request_options := {
+		"method": "POST",
+		"timeout": request_context["timeout"]
+	}
+	connect_timeout := request_context["connect_timeout"]
+	if connect_timeout > 0 {
+		request_options["connect_timeout"] := connect_timeout
+	}
+	read_timeout := request_context["read_timeout"]
+	if read_timeout > 0 {
+		request_options["read_timeout"] := read_timeout
+	}
+	if deadline_ms > 0 {
+		now_ms := current_timestamp()
+		remaining_ms := deadline_ms - now_ms
+		if remaining_ms <= 0 {
+			deadline_result := deadline_exceeded_response(client, deadline_ms, now_ms)
+			return finalize_request_result(deadline_result, resolved_options, attempt, started_at, trace_id, request_id)
+		}
+		remaining_timeout := (remaining_ms * 1.0) / 1000.0
+		if remaining_timeout < request_options["timeout"] {
+			request_options["timeout"] := remaining_timeout
+		}
+	}
+	request_options["_headers"] := request_context["headers"]
+	request_options["_body"] := request_context["body"]
+
+	http_result := request_context["transport"](request_context["url"], request_options)
+	match http_result {
+		case Ok(response): {
+			status_code := dict_get_or(response, "_status", dict_get_or(response, "status", 0))
+			body_text := dict_get_or(response, "_body", dict_get_or(response, "body", ""))
+
+			if status_code < 200 || status_code > 299 {
+				retryable_http_error := is_retryable_http_status(status_code)
+				result := standard_error_response_impl(
+					client,
+					"http_error",
+					"HTTP " + to_string(status_code),
+					status_code,
+					response,
+					retryable_http_error
+				)
+				return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
+			}
+
+			parsed := parse_json_safe(body_text)
+			if !parsed["ok"] {
+				result := standard_error_response_impl(
+					client,
+					"invalid_json",
+					"Could not parse response JSON: " + parsed["error"],
+					status_code,
+					{"body": body_text},
+					false
+				)
+				return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
+			}
+
+			data := parsed["data"]
+			if type(data) == "dict" {
+				if has_key(data, "error") {
+					result := normalize_provider_error_payload(client, status_code, data)
+					return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
+				}
+			}
+
+			result := normalize_embeddings_success_response(client, status_code, data, payload["model"])
+			return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
+		}
+		case Err(error): {
+			result := standard_error_response_impl(
+				client,
+				"network_error",
+				error,
+				0,
+				null,
+				true
+			)
+			return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
+		}
+		case other: {
+			result := standard_error_response_impl(
+				client,
+				"transport_error",
+				"Unexpected http_request result type: " + type(other),
+				0,
+				null,
+				true
+			)
+			return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
+		}
+	}
+}
+
+func embeddings_impl(client, input_value, options) {
+	fallback_disabled := false
+	if type(options) == "dict" {
+		fallback_disabled := dict_get_or(options, "_fallback_disabled", false)
+	}
+
+	resolved_options := resolve_chat_options(client, options)
+	if !fallback_disabled {
+		fallback_providers := dict_get_or(resolved_options, "fallback_providers", [])
+		if type(fallback_providers) == "array" {
+			if len(fallback_providers) > 0 {
+				primary_options := build_primary_options_for_fallback(options)
+				primary_result := embeddings_impl(client, input_value, primary_options)
+				if primary_result["ok"] {
+					return primary_result
+				}
+				if !should_retry_result(primary_result) {
+					return primary_result
+				}
+
+				last_result := primary_result
+				i := 0
+				while i < len(fallback_providers) {
+					entry := fallback_providers[i]
+					if type(entry) != "dict" {
+						i := i + 1
+						continue
+					}
+
+					fallback_provider := entry
+					if has_key(entry, "provider") {
+						fallback_provider := entry["provider"]
+					}
+					if type(fallback_provider) != "dict" {
+						i := i + 1
+						continue
+					}
+
+					fallback_api_key := client["api_key"]
+					if has_key(entry, "api_key") {
+						fallback_api_key := entry["api_key"]
+					}
+
+					fallback_client := create_client_impl(fallback_provider, fallback_api_key)
+					override_options := dict_get_or(entry, "options", null)
+					fallback_options := merge_fallback_options(primary_options, override_options)
+					fallback_result := embeddings_impl(fallback_client, input_value, fallback_options)
+					fallback_result["fallback"] := {
+						"used": true,
+						"index": i,
+						"provider": fallback_provider["name"]
+					}
+
+					if fallback_result["ok"] {
+						return fallback_result
+					}
+
+					last_result := fallback_result
+					if !should_retry_result(fallback_result) {
+						return fallback_result
+					}
+
+					i := i + 1
+				}
+
+				return last_result
+			}
+		}
+	}
+
+	config_error := dict_get_or(client, "config_error", "")
+	if config_error != "" {
+		return standard_error_response_impl(
+			client,
+			"config_error",
+			config_error,
+			0,
+			null,
+			false
+		)
+	}
+
+	if !provider_supports_impl(client["provider"], "embeddings") {
+		return standard_error_response_impl(
+			client,
+			"unsupported_feature",
+			"Provider does not support embeddings.",
+			0,
+			null,
+			false
+		)
+	}
+
+	payload := build_embeddings_payload_with_resolved(client, input_value, options, resolved_options)
+	input_characters := embeddings_input_character_count(input_value)
+	max_prompt_characters := dict_get_or(resolved_options, "max_prompt_characters", 20000)
+	if input_characters > max_prompt_characters {
+		return budget_error_response(
+			client,
+			"Embedding input character budget exceeded. Reduce input size or raise max_prompt_characters.",
+			payload,
+			input_characters
+		)
+	}
+
+	if resolved_options["offline_fixture"] {
+		return fixture_embeddings_response_impl(client, payload)
+	}
+
+	missing_key := false
+	if type(client["api_key"]) == "null" {
+		missing_key := true
+	}
+	if client["api_key"] == "" {
+		missing_key := true
+	}
+
+	if missing_key {
+		return standard_error_response_impl(
+			client,
+			"auth_error",
+			"Missing API key. Set " + client["provider"]["api_key_env"] + " before calling embeddings.",
+			0,
+			null,
+			false
+		)
+	}
+
+	endpoint_policy_error := enforce_endpoint_allowlist_policy(client, resolved_options)
+	if type(endpoint_policy_error) == "dict" {
+		return endpoint_policy_error
+	}
+
+	request_context := build_embeddings_request_context(client, payload, options, resolved_options)
+
+	max_retries := resolved_options["max_retries"]
+	retry_budget := resolved_options["retry_budget"]
+	if retry_budget < 0 {
+		retry_budget := 0
+	}
+	if retry_budget < max_retries {
+		max_retries := retry_budget
+	}
+
+	base_retry_delay_ms := resolved_options["retry_delay_ms"]
+	retry_jitter_ms := resolved_options["retry_jitter_ms"]
+	max_retry_delay_ms := resolved_options["max_retry_delay_ms"]
+	request_started_at_ms := current_timestamp()
+	deadline_ms := resolve_request_deadline_ms(resolved_options, request_started_at_ms)
+	trace_id := dict_get_or(resolved_options, "trace_id", "")
+	if trace_id == "" {
+		trace_sequence := dict_get_or(client, "trace_sequence", 0) + 1
+		client["trace_sequence"] := trace_sequence
+		trace_id := client["provider"]["name"] + "-trace-" + to_string(current_timestamp()) + "-" + to_string(trace_sequence)
+	}
+	start_count := 0
+	complete_count := 0
+	retry_count := 0
+
+	attempt := 0
+	while attempt <= max_retries {
+		if deadline_ms > 0 {
+			now_ms := current_timestamp()
+			if now_ms >= deadline_ms {
+				deadline_result := deadline_exceeded_response(client, deadline_ms, now_ms)
+				return finalize_embeddings_result(deadline_result, start_count, complete_count, retry_count)
+			}
+		}
+
+		result := execute_embeddings_request_once(client, payload, resolved_options, attempt, deadline_ms, trace_id, request_context)
+		attempt_observability := dict_get_or(result, "observability", {})
+		start_count := start_count + dict_get_or(attempt_observability, "start_count", 0)
+		complete_count := complete_count + dict_get_or(attempt_observability, "complete_count", 0)
+		if result["ok"] {
+			return finalize_embeddings_result(result, start_count, complete_count, retry_count)
+		}
+
+		if !should_retry_result(result) {
+			return finalize_embeddings_result(result, start_count, complete_count, retry_count)
+		}
+
+		if attempt == max_retries {
+			return finalize_embeddings_result(result, start_count, complete_count, retry_count)
+		}
+
+		delay_ms := compute_retry_delay_ms(attempt, base_retry_delay_ms, max_retry_delay_ms, retry_jitter_ms)
+		retry_count := retry_count + 1
+		retry_hook := dict_get_or(resolved_options, "on_retry", null)
+		if type(retry_hook) == "function" {
+			err_obj := dict_get_or(result, "error", {})
+			event := {
+				"operation": "embeddings",
+				"attempt": attempt,
+				"next_attempt": attempt + 1,
+				"delay_ms": delay_ms,
+				"status_code": dict_get_or(result, "status_code", 0),
+				"error_code": dict_get_or(err_obj, "code", "")
+			}
+			emit_hook_safe(retry_hook, event)
+		}
+		if deadline_ms > 0 {
+			now_ms := current_timestamp()
+			remaining_ms := deadline_ms - now_ms
+			if remaining_ms <= 0 {
+				deadline_result := deadline_exceeded_response(client, deadline_ms, now_ms)
+				return finalize_embeddings_result(deadline_result, start_count, complete_count, retry_count)
+			}
+			if delay_ms > remaining_ms {
+				delay_ms := remaining_ms
+			}
+		}
+		sleep(delay_ms)
+		attempt := attempt + 1
+	}
+
+	return finalize_embeddings_result(
+		standard_error_response_impl(
+			client,
+			"internal_error",
+			"Embeddings retry loop exhausted unexpectedly.",
+			0,
+			null,
+			false
+		),
+		start_count,
+		complete_count,
+		retry_count
+	)
+}
+
+func parse_sse_lines(body_text) {
+	stream_events := []
+	current_payload := ""
+	lines := split(body_text, "\n")
+
+	i := 0
+	while i < len(lines) {
+		line := trim(lines[i])
+		if starts_with(line, "data:") {
+			payload_text := trim(replace(line, "data:", ""))
+			if payload_text == "[DONE]" {
+				if current_payload != "" {
+					parsed_event := parse_json_safe(current_payload)
+					if parsed_event["ok"] {
+						stream_events := push(stream_events, parsed_event["data"])
+					}
+					current_payload := ""
+				}
+				break
+			}
+			if payload_text != "" {
+				if current_payload == "" {
+					current_payload := payload_text
+				} else {
+					current_payload := current_payload + "\n" + payload_text
+				}
+			}
+		} else {
+			if line == "" {
+				if current_payload != "" {
+					parsed_event := parse_json_safe(current_payload)
+					if parsed_event["ok"] {
+						stream_events := push(stream_events, parsed_event["data"])
+					}
+					current_payload := ""
+				}
+			}
+		}
+		i := i + 1
+	}
+
+	if current_payload != "" {
+		parsed_event := parse_json_safe(current_payload)
+		if parsed_event["ok"] {
+			stream_events := push(stream_events, parsed_event["data"])
+		}
+	}
+
+	return stream_events
+}
+
+func parse_sse_chunks(chunks) {
+	stream_events := []
+	current_payload := ""
+	buffer := ""
+
+	i := 0
+	while i < len(chunks) {
+		chunk := chunks[i]
+		if type(chunk) != "string" {
+			i := i + 1
+			continue
+		}
+
+		buffer := buffer + chunk
+		lines := split(buffer, "\n")
+		line_count := len(lines)
+		if line_count == 0 {
+			i := i + 1
+			continue
+		}
+		buffer := lines[line_count - 1]
+
+		line_index := 0
+		while line_index < line_count - 1 {
+			line := trim(lines[line_index])
+			if starts_with(line, "data:") {
+				payload_text := trim(replace(line, "data:", ""))
+				if payload_text == "[DONE]" {
+					if current_payload != "" {
+						parsed_event := parse_json_safe(current_payload)
+						if parsed_event["ok"] {
+							stream_events := push(stream_events, parsed_event["data"])
+						}
+						current_payload := ""
+					}
+					return stream_events
+				}
+				if payload_text != "" {
+					if current_payload == "" {
+						current_payload := payload_text
+					} else {
+						current_payload := current_payload + "\n" + payload_text
+					}
+				}
+			} else {
+				if line == "" {
+					if current_payload != "" {
+						parsed_event := parse_json_safe(current_payload)
+						if parsed_event["ok"] {
+							stream_events := push(stream_events, parsed_event["data"])
+						}
+						current_payload := ""
+					}
+				}
+			}
+
+			line_index := line_index + 1
+		}
+
+		i := i + 1
+	}
+
+	if trim(buffer) != "" {
+		line := trim(buffer)
+		if starts_with(line, "data:") {
+			payload_text := trim(replace(line, "data:", ""))
+			if payload_text != "[DONE]" && payload_text != "" {
+				if current_payload == "" {
+					current_payload := payload_text
+				} else {
+					current_payload := current_payload + "\n" + payload_text
+				}
+			}
+		}
+	}
+
+	if current_payload != "" {
+		parsed_event := parse_json_safe(current_payload)
+		if parsed_event["ok"] {
+			stream_events := push(stream_events, parsed_event["data"])
+		}
+	}
+
+	return stream_events
+}
+
+func collect_stream_delta_chunks(stream_events) {
+	delta_chunks := []
+	i := 0
+	while i < len(stream_events) {
+		event := stream_events[i]
+		if type(event) == "dict" {
+			choices := dict_get_or(event, "choices", [])
+			if type(choices) == "array" {
+				if len(choices) > 0 {
+					first_choice := choices[0]
+					if type(first_choice) == "dict" {
+						delta_text := extract_stream_delta_text(first_choice)
+						if delta_text != "" {
+							delta_chunks := push(delta_chunks, delta_text)
+						}
+					}
+				}
+			}
+		}
+		i := i + 1
+	}
+
+	return delta_chunks
+}
+
+func chunk_text_for_stream(text) {
+	if text == "" {
+		return []
+	}
+
+	chunks := []
+	words := split(text, " ")
+	i := 0
+	while i < len(words) {
+		word := words[i]
+		if i < len(words) - 1 {
+			word := word + " "
+		}
+		chunks := push(chunks, word)
+		i := i + 1
+	}
+
+	return chunks
+}
+
+func is_retryable_http_status(status_code) {
+	if status_code == 429 {
+		return true
+	}
+	if status_code >= 500 {
+		return true
+	}
+	return false
+}
+
+func should_retry_result(result) {
+	if result["ok"] {
+		return false
+	}
+
+	err := dict_get_or(result, "error", {})
+	error_code := dict_get_or(err, "code", "")
+	if error_code == "network_error" {
+		return true
+	}
+
+	if error_code == "http_error" {
+		status_code := dict_get_or(result, "status_code", 0)
+		return is_retryable_http_status(status_code)
+	}
+
+	if has_key(err, "retryable") {
+		return err["retryable"]
+	}
+
+	return false
+}
+
+func compute_retry_jitter_ms(attempt, jitter_window_ms) {
+	if jitter_window_ms <= 0 {
+		return 0
+	}
+
+	# Deterministic jitter keeps tests stable while avoiding synchronized retries.
+	return ((attempt + 1) * 37) % (jitter_window_ms + 1)
+}
+
+func compute_retry_delay_ms(attempt, base_delay_ms, max_delay_ms, jitter_window_ms) {
+	delay := base_delay_ms
+	i := 0
+	while i < attempt {
+		delay := delay * 2
+		i := i + 1
+	}
+	delay := delay + compute_retry_jitter_ms(attempt, jitter_window_ms)
+	if delay > max_delay_ms {
+		delay := max_delay_ms
+	}
+	return delay
+}
+
+func canonical_header_name(header_name) {
+	if header_name == "Authorization" {
+		return "Authorization"
+	}
+	if header_name == "authorization" {
+		return "Authorization"
+	}
+	if header_name == "Content-Type" {
+		return "Content-Type"
+	}
+	if header_name == "content-type" {
+		return "Content-Type"
+	}
+	return header_name
+}
+
+func is_protected_header_name(header_name) {
+	canonical_name := canonical_header_name(header_name)
+	if canonical_name == "Authorization" {
+		return true
+	}
+	if canonical_name == "Content-Type" {
+		return true
+	}
+	return false
+}
+
+func merge_headers_with_policy(default_headers, extra_headers, allow_protected_override) {
+	headers := {}
+	for key in keys(default_headers) {
+		headers[key] := default_headers[key]
+	}
+
+	if type(extra_headers) != "dict" {
+		return headers
+	}
+
+	for header_name in keys(extra_headers) {
+		canonical_name := canonical_header_name(header_name)
+		if is_protected_header_name(header_name) {
+			if allow_protected_override {
+				headers[canonical_name] := extra_headers[header_name]
+			}
+		} else {
+			headers[canonical_name] := extra_headers[header_name]
+		}
+	}
+
+	return headers
+}
+
+func emit_hook_safe(hook, event) {
+	hook_error := null
+	try {
+		hook(event)
+	} except err {
+		hook_error := err
+	}
+
+	if type(hook_error) != "null" {
+		return false
+	}
+
+	return true
+}
+
+func callback_error_message(error_value) {
+	error_type := type(error_value)
+	if error_type == "string" {
+		return error_value
+	}
+	if error_type == "int" || error_type == "float" || error_type == "bool" {
+		return to_string(error_value)
+	}
+	if error_type == "null" {
+		return "stream callback failed"
+	}
+
+	# Some runtimes expose callback errors as complex objects whose string conversion
+	# can recurse through captured state; keep this message deterministic.
+	return "stream callback failed"
+}
+
+func finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id) {
+	finished_at := current_timestamp()
+	duration_ms := finished_at - started_at
+	if duration_ms < 0 {
+		duration_ms := 0
+	}
+
+	complete_hook := dict_get_or(resolved_options, "on_request_complete", null)
+	if type(complete_hook) == "function" {
+		err_obj := dict_get_or(result, "error", {})
+		event := {
+			"attempt": attempt,
+			"ok": dict_get_or(result, "ok", false),
+			"status_code": dict_get_or(result, "status_code", 0),
+			"error_code": dict_get_or(err_obj, "code", ""),
+			"started_at": started_at,
+			"finished_at": finished_at,
+			"duration_ms": duration_ms,
+			"trace_id": trace_id,
+			"request_id": request_id
+		}
+		emit_hook_safe(complete_hook, event)
+	}
+	result["observability"] := {
+		"start_count": 1,
+		"complete_count": 1,
+		"retry_count": 0,
+		"trace_id": trace_id,
+		"request_id": request_id,
+		"started_at": started_at,
+		"finished_at": finished_at,
+		"duration_ms": duration_ms
+	}
+
+	return result
+}
+
+func resolve_request_deadline_ms(resolved_options, request_started_at_ms) {
+	absolute_deadline_ms := dict_get_or(resolved_options, "deadline_ms", 0)
+	if absolute_deadline_ms > 0 {
+		return absolute_deadline_ms
+	}
+
+	overall_timeout_ms := dict_get_or(resolved_options, "overall_timeout_ms", 0)
+	if overall_timeout_ms > 0 {
+		return request_started_at_ms + overall_timeout_ms
+	}
+
+	return 0
+}
+
+func deadline_exceeded_response(client, deadline_ms, now_ms) {
+	return standard_error_response_impl(
+		client,
+		"deadline_exceeded",
+		"Overall request deadline exceeded.",
+		408,
+		{
+			"deadline_ms": deadline_ms,
+			"now_ms": now_ms
+		},
+		false
+	)
+}
+
+func enforce_structured_output_contract(client, result, resolved_options) {
+	if !result["ok"] {
+		return result
+	}
+
+	schema := dict_get_or(resolved_options, "structured_output_schema", null)
+	if type(schema) != "dict" {
+		return result
+	}
+
+	output_text := dict_get_or(result, "output_text", "")
+	parsed := parse_json_safe(output_text)
+	if !parsed["ok"] {
+		return standard_error_response_impl(
+			client,
+			"structured_output_invalid",
+			"Structured output validation failed: expected valid JSON output.",
+			422,
+			{
+				"schema": schema,
+				"output_text": output_text,
+				"parse_error": parsed["error"]
+			},
+			dict_get_or(resolved_options, "structured_output_retryable", true)
+		)
+	}
+
+	parsed_payload := parsed["data"]
+	if type(parsed_payload) != "dict" {
+		return standard_error_response_impl(
+			client,
+			"structured_output_invalid",
+			"Structured output validation failed: expected JSON object output.",
+			422,
+			{
+				"schema": schema,
+				"output_text": output_text
+			},
+			dict_get_or(resolved_options, "structured_output_retryable", true)
+		)
+	}
+
+	required_fields := dict_get_or(schema, "required", [])
+	if type(required_fields) == "array" {
+		i := 0
+		while i < len(required_fields) {
+			field_name := required_fields[i]
+			if type(field_name) == "string" {
+				if has_key(parsed_payload, field_name) == 0 {
+					return standard_error_response_impl(
+						client,
+						"structured_output_invalid",
+						"Structured output validation failed: missing required field '" + field_name + "'.",
+						422,
+						{
+							"schema": schema,
+							"output_text": output_text,
+							"missing_field": field_name
+						},
+						dict_get_or(resolved_options, "structured_output_retryable", true)
+					)
+				}
+			}
+			i := i + 1
+		}
+	}
+
+	return result
+}
+
+func circuit_breaker_enabled(resolved_options) {
+	return dict_get_or(resolved_options, "circuit_breaker_enabled", false)
+}
+
+func circuit_breaker_threshold(resolved_options) {
+	threshold := dict_get_or(resolved_options, "circuit_breaker_error_threshold", 5)
+	if threshold < 1 {
+		return 1
+	}
+	return threshold
+}
+
+func circuit_breaker_cooldown(resolved_options) {
+	cooldown_ms := dict_get_or(resolved_options, "circuit_breaker_cooldown_ms", 15000)
+	if cooldown_ms < 0 {
+		return 0
+	}
+	return cooldown_ms
+}
+
+func state_backend_key(client, resolved_options, suffix) {
+	namespace := dict_get_or(resolved_options, "state_namespace", "")
+	if namespace == "" {
+		namespace := client["provider"]["name"]
+	}
+	return "ai_sdk:" + namespace + ":" + suffix
+}
+
+func state_backend_get(resolved_options, key, fallback_value) {
+	backend := dict_get_or(resolved_options, "state_backend", null)
+	if type(backend) != "dict" {
+		return fallback_value
+	}
+
+	registry_id := dict_get_or(backend, "registry_id", "")
+	if registry_id != "" {
+		if has_key(STATE_BACKEND_REGISTRY, registry_id) {
+			bucket := STATE_BACKEND_REGISTRY[registry_id]
+			if type(bucket) == "dict" && has_key(bucket, key) {
+				return bucket[key]
+			}
+		}
+		return fallback_value
+	}
+
+	backend_state := dict_get_or(backend, "state", null)
+	if type(backend_state) == "dict" {
+		if has_key(backend_state, key) {
+			return backend_state[key]
+		}
+		return fallback_value
+	}
+
+	get_fn := dict_get_or(backend, "get", null)
+	if type(get_fn) != "function" {
+		return fallback_value
+	}
+
+	result := fallback_value
+	get_error := null
+	try {
+		result := get_fn(key, fallback_value)
+	} except err {
+		get_error := err
+	}
+
+	if type(get_error) != "null" {
+		return fallback_value
+	}
+
+	return result
+}
+
+func state_backend_set(resolved_options, key, value) {
+	backend := dict_get_or(resolved_options, "state_backend", null)
+	if type(backend) != "dict" {
+		return
+	}
+
+	registry_id := dict_get_or(backend, "registry_id", "")
+	if registry_id != "" {
+		if has_key(STATE_BACKEND_REGISTRY, registry_id) == 0 {
+			STATE_BACKEND_REGISTRY[registry_id] := {}
+		}
+		bucket := STATE_BACKEND_REGISTRY[registry_id]
+		if type(bucket) == "dict" {
+			bucket[key] := value
+		}
+		return
+	}
+
+	backend_state := dict_get_or(backend, "state", null)
+	if type(backend_state) == "dict" {
+		backend_state[key] := value
+		return
+	}
+
+	set_fn := dict_get_or(backend, "set", null)
+	if type(set_fn) != "function" {
+		return
+	}
+
+	set_error := null
+	try {
+		set_fn(key, value)
+	} except err {
+		set_error := err
+	}
+
+	if type(set_error) != "null" {
+		return
+	}
+}
+
+func load_breaker_consecutive_failures(client, resolved_options) {
+	local_value := dict_get_or(client, "circuit_breaker_consecutive_failures", 0)
+	key := state_backend_key(client, resolved_options, "breaker_consecutive_failures")
+	value := state_backend_get(resolved_options, key, local_value)
+	if type(value) != "int" {
+		return local_value
+	}
+	return value
+}
+
+func load_breaker_open_until_ms(client, resolved_options) {
+	local_value := dict_get_or(client, "circuit_breaker_open_until_ms", 0)
+	key := state_backend_key(client, resolved_options, "breaker_open_until_ms")
+	value := state_backend_get(resolved_options, key, local_value)
+	if type(value) != "int" {
+		return local_value
+	}
+	return value
+}
+
+func track_circuit_breaker_result(resolved_options, result, consecutive_failures) {
+	if !circuit_breaker_enabled(resolved_options) {
+		return {
+			"opened_now": false,
+			"open_until_ms": 0,
+			"consecutive_failures": consecutive_failures
+		}
+	}
+
+	if result["ok"] {
+		return {
+			"opened_now": false,
+			"open_until_ms": 0,
+			"consecutive_failures": 0
+		}
+	}
+
+	if !should_retry_result(result) {
+		return {
+			"opened_now": false,
+			"open_until_ms": 0,
+			"consecutive_failures": 0
+		}
+	}
+
+	updated_consecutive_failures := consecutive_failures + 1
+	threshold := circuit_breaker_threshold(resolved_options)
+	if updated_consecutive_failures < threshold {
+		return {
+			"opened_now": false,
+			"open_until_ms": 0,
+			"consecutive_failures": updated_consecutive_failures
+		}
+	}
+
+	now_ms := current_timestamp()
+	open_until_ms := now_ms + circuit_breaker_cooldown(resolved_options)
+	return {
+		"opened_now": true,
+		"open_until_ms": open_until_ms,
+		"consecutive_failures": updated_consecutive_failures
+	}
+}
+
+func persist_circuit_breaker_state(client, consecutive_failures, open_until_ms) {
+	client["circuit_breaker_consecutive_failures"] := consecutive_failures
+	client["circuit_breaker_open_until_ms"] := open_until_ms
+}
+
+func persist_circuit_breaker_state_with_backend(client, resolved_options, consecutive_failures, open_until_ms) {
+	persist_circuit_breaker_state(client, consecutive_failures, open_until_ms)
+	consecutive_key := state_backend_key(client, resolved_options, "breaker_consecutive_failures")
+	open_until_key := state_backend_key(client, resolved_options, "breaker_open_until_ms")
+	state_backend_set(resolved_options, consecutive_key, consecutive_failures)
+	state_backend_set(resolved_options, open_until_key, open_until_ms)
+}
+
+func circuit_breaker_open_response(client, open_until_ms, now_ms, cause_result) {
+	remaining_ms := open_until_ms - now_ms
+	if remaining_ms < 0 {
+		remaining_ms := 0
+	}
+
+	return standard_error_response_impl(
+		client,
+		"circuit_breaker_open",
+		"Circuit breaker is open due to consecutive retryable failures. Retry after cooldown.",
+		0,
+		{
+			"open_until_ms": open_until_ms,
+			"remaining_ms": remaining_ms,
+			"cause": cause_result
+		},
+		false
+	)
+}
+
+func finalize_chat_completion_result(client, result, start_count, complete_count, retry_count) {
+	previous_observability := dict_get_or(result, "observability", {})
+	observability := {
+		"start_count": start_count,
+		"complete_count": complete_count,
+		"retry_count": retry_count
+	}
+	if type(previous_observability) == "dict" {
+		if has_key(previous_observability, "trace_id") {
+			observability["trace_id"] := previous_observability["trace_id"]
+		}
+		if has_key(previous_observability, "request_id") {
+			observability["request_id"] := previous_observability["request_id"]
+		}
+		if has_key(previous_observability, "started_at") {
+			observability["started_at"] := previous_observability["started_at"]
+		}
+		if has_key(previous_observability, "finished_at") {
+			observability["finished_at"] := previous_observability["finished_at"]
+		}
+		if has_key(previous_observability, "duration_ms") {
+			observability["duration_ms"] := previous_observability["duration_ms"]
+		}
+	}
+	result["observability"] := observability
+
+	current_in_flight := dict_get_or(client, "in_flight_requests", 0)
+	if current_in_flight > 0 {
+		client["in_flight_requests"] := current_in_flight - 1
+	}
+
+	return result
+}
+
+func execute_request_once(client, messages, options, resolved_options, payload, budget_error, attempt, deadline_ms, trace_id) {
+	stream_requested := dict_get_or(payload, "stream", false)
+	started_at := current_timestamp()
+	request_id := trace_id + "-attempt-" + to_string(attempt)
+	if deadline_ms > 0 {
+		if started_at >= deadline_ms {
+			deadline_result := deadline_exceeded_response(client, deadline_ms, started_at)
+			return finalize_request_result(deadline_result, resolved_options, attempt, started_at, trace_id, request_id)
+		}
+	}
+	if type(budget_error) == "dict" {
+		return finalize_request_result(budget_error, resolved_options, attempt, started_at, trace_id, request_id)
+	}
+
+	start_hook := dict_get_or(resolved_options, "on_request_start", null)
+	if type(start_hook) == "function" {
+		event := {
+			"attempt": attempt,
+			"provider": client["provider"]["name"],
+			"url": client["provider"]["base_url"] + client["provider"]["chat_path"],
+			"stream": stream_requested,
+			"started_at": started_at,
+			"trace_id": trace_id,
+			"request_id": request_id
+		}
+		emit_hook_safe(start_hook, event)
+	}
+
+	if stream_requested {
+		if !provider_supports_impl(client["provider"], "streaming") {
+			result := standard_error_response_impl(
+				client,
+				"unsupported_feature",
+				"Provider does not support streaming.",
+				0,
+				null,
+				false
+			)
+			return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
+		}
+	}
+
+	if has_key(payload, "tools") {
+		if !provider_supports_impl(client["provider"], "tool_calls") {
+			result := standard_error_response_impl(
+				client,
+				"unsupported_feature",
+				"Provider does not support tool calls.",
+				0,
+				null,
+				false
+			)
+			return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
+		}
+	}
+
+	headers := {
+		"Authorization": "Bearer " + client["api_key"],
+		"Content-Type": "application/json"
+	}
+	allow_protected_header_override := false
+	extra_headers := null
+
+	if type(options) == "dict" {
+		extra_headers := dict_get_or(options, "headers", null)
+		allow_protected_header_override := resolved_options["allow_unsafe_header_override"]
+	}
+	headers := merge_headers_with_policy(headers, extra_headers, allow_protected_header_override)
+
+	url := client["provider"]["base_url"] + client["provider"]["chat_path"]
+	timeout := resolved_options["timeout"]
+
+	request_options := {
+		"method": "POST",
+		"timeout": timeout
+	}
+	connect_timeout := resolved_options["connect_timeout"]
+	if connect_timeout > 0 {
+		request_options["connect_timeout"] := connect_timeout
+	}
+	read_timeout := resolved_options["read_timeout"]
+	if read_timeout > 0 {
+		request_options["read_timeout"] := read_timeout
+	}
+	if deadline_ms > 0 {
+		now_ms := current_timestamp()
+		remaining_ms := deadline_ms - now_ms
+		if remaining_ms <= 0 {
+			deadline_result := deadline_exceeded_response(client, deadline_ms, now_ms)
+			return finalize_request_result(deadline_result, resolved_options, attempt, started_at, trace_id, request_id)
+		}
+		remaining_timeout := (remaining_ms * 1.0) / 1000.0
+		if remaining_timeout < timeout {
+			timeout := remaining_timeout
+			request_options["timeout"] := timeout
+		}
+	}
+	request_options["_headers"] := headers
+	request_options["_body"] := to_json(payload)
+
+	transport := resolve_transport_with_resolved(client, resolved_options)
+	http_result := transport(url, request_options)
+	match http_result {
+		case Ok(response): {
+			status_code := dict_get_or(response, "_status", dict_get_or(response, "status", 0))
+			body_text := dict_get_or(response, "_body", dict_get_or(response, "body", ""))
+
+			if status_code < 200 {
+				retryable_http_error := is_retryable_http_status(status_code)
+				result := standard_error_response_impl(
+					client,
+					"http_error",
+					"HTTP " + to_string(status_code),
+					status_code,
+					response,
+					retryable_http_error
+				)
+				return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
+			}
+			if status_code > 299 {
+				retryable_http_error := is_retryable_http_status(status_code)
+				result := standard_error_response_impl(
+					client,
+					"http_error",
+					"HTTP " + to_string(status_code),
+					status_code,
+					response,
+					retryable_http_error
+				)
+				return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
+			}
+
+			if stream_requested {
+				stream_events := []
+				stream_chunks := dict_get_or(response, "_stream_chunks", dict_get_or(response, "stream_chunks", null))
+				if type(stream_chunks) == "array" {
+					stream_events := parse_sse_chunks(stream_chunks)
+				}
+				if len(stream_events) == 0 {
+					stream_events := parse_sse_lines(body_text)
+				}
+				if len(stream_events) > 0 {
+					result := normalize_stream_success_response(client, status_code, stream_events, payload["model"])
+					result := enforce_structured_output_contract(client, result, resolved_options)
+					result := apply_governance_post_response(client, result, messages, payload, resolved_options)
+					return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
+				}
+			}
+
+			parsed := parse_json_safe(body_text)
+			if !parsed["ok"] {
+				result := standard_error_response_impl(
+					client,
+					"invalid_json",
+					"Could not parse response JSON: " + parsed["error"],
+					status_code,
+					{"body": body_text},
+					false
+				)
+				return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
+			}
+
+			data := parsed["data"]
+			if type(data) == "dict" {
+				if has_key(data, "error") {
+					result := normalize_provider_error_payload(client, status_code, data)
+					return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
+				}
+			}
+
+			result := normalize_success_response(client, status_code, data, payload["model"])
+			result := enforce_structured_output_contract(client, result, resolved_options)
+			result := apply_governance_post_response(client, result, messages, payload, resolved_options)
+			return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
+		}
+		case Err(error): {
+			result := standard_error_response_impl(
+				client,
+				"network_error",
+				error,
+				0,
+				null,
+				true
+			)
+			return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
+		}
+		case other: {
+			result := standard_error_response_impl(
+				client,
+				"transport_error",
+				"Unexpected http_request result type: " + type(other),
+				0,
+				null,
+				true
+			)
+			return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
+		}
+	}
+}
+
+func build_primary_options_for_fallback(options) {
+	primary_options := {}
+	if type(options) == "dict" {
+		for key in keys(options) {
+			if key == "fallback_providers" {
+				continue
+			}
+			if key == "_fallback_disabled" {
+				continue
+			}
+			primary_options[key] := options[key]
+		}
+	}
+	primary_options["_fallback_disabled"] := true
+	return primary_options
+}
+
+func merge_fallback_options(base_options, override_options) {
+	merged := {}
+	for key in keys(base_options) {
+		merged[key] := base_options[key]
+	}
+	if type(override_options) == "dict" {
+		for key in keys(override_options) {
+			merged[key] := override_options[key]
+		}
+	}
+	merged["_fallback_disabled"] := true
+	return merged
+}
+
+func chat_completion_impl(client, messages, options) {
+	fallback_disabled := false
+	if type(options) == "dict" {
+		fallback_disabled := dict_get_or(options, "_fallback_disabled", false)
+	}
+
+	resolved_options := resolve_chat_options(client, options)
+	if !fallback_disabled {
+		fallback_providers := dict_get_or(resolved_options, "fallback_providers", [])
+		if type(fallback_providers) == "array" {
+			if len(fallback_providers) > 0 {
+				primary_options := build_primary_options_for_fallback(options)
+				primary_result := chat_completion_impl(client, messages, primary_options)
+				if primary_result["ok"] {
+					return primary_result
+				}
+				if !should_retry_result(primary_result) {
+					return primary_result
+				}
+
+				last_result := primary_result
+				i := 0
+				while i < len(fallback_providers) {
+					entry := fallback_providers[i]
+					if type(entry) != "dict" {
+						i := i + 1
+						continue
+					}
+
+					fallback_provider := entry
+					if has_key(entry, "provider") {
+						fallback_provider := entry["provider"]
+					}
+					if type(fallback_provider) != "dict" {
+						i := i + 1
+						continue
+					}
+
+					fallback_api_key := client["api_key"]
+					if has_key(entry, "api_key") {
+						fallback_api_key := entry["api_key"]
+					}
+
+					fallback_client := create_client_impl(fallback_provider, fallback_api_key)
+					override_options := dict_get_or(entry, "options", null)
+					fallback_options := merge_fallback_options(primary_options, override_options)
+					fallback_result := chat_completion_impl(fallback_client, messages, fallback_options)
+					fallback_result["fallback"] := {
+						"used": true,
+						"index": i,
+						"provider": fallback_provider["name"]
+					}
+
+					if fallback_result["ok"] {
+						return fallback_result
+					}
+
+					last_result := fallback_result
+					if !should_retry_result(fallback_result) {
+						return fallback_result
+					}
+
+					i := i + 1
+				}
+
+				return last_result
+			}
+		}
+	}
+
+	config_error := dict_get_or(client, "config_error", "")
+	if config_error != "" {
+		return standard_error_response_impl(
+			client,
+			"config_error",
+			config_error,
+			0,
+			null,
+			false
+		)
+	}
+
+	if resolved_options["offline_fixture"] {
+		return fixture_response_impl(client)
+	}
+
+	missing_key := false
+	if type(client["api_key"]) == "null" {
+		missing_key := true
+	}
+	if client["api_key"] == "" {
+		missing_key := true
+	}
+
+	if missing_key {
+		return standard_error_response_impl(
+			client,
+			"auth_error",
+			"Missing API key. Set " + client["provider"]["api_key_env"] + " before calling chat_completion.",
+			0,
+			null,
+			false
+		)
+	}
+
+	endpoint_policy_error := enforce_endpoint_allowlist_policy(client, resolved_options)
+	if type(endpoint_policy_error) == "dict" {
+		return endpoint_policy_error
+	}
+
+	half_open_probe_mode := false
+	breaker_open_until_ms := load_breaker_open_until_ms(client, resolved_options)
+	breaker_consecutive_failures := load_breaker_consecutive_failures(client, resolved_options)
+	if circuit_breaker_enabled(resolved_options) {
+		now_ms := current_timestamp()
+		if breaker_open_until_ms > now_ms {
+			return circuit_breaker_open_response(client, breaker_open_until_ms, now_ms, null)
+		}
+
+		if breaker_open_until_ms > 0 {
+			half_open_enabled := dict_get_or(resolved_options, "circuit_breaker_half_open_enabled", true)
+			if half_open_enabled {
+				half_open_probe_mode := true
+				breaker_consecutive_failures := circuit_breaker_threshold(resolved_options) - 1
+			} else {
+				breaker_consecutive_failures := 0
+			}
+			breaker_open_until_ms := 0
+			persist_circuit_breaker_state_with_backend(client, resolved_options, breaker_consecutive_failures, breaker_open_until_ms)
+		}
+	}
+
+	max_in_flight_requests := resolved_options["max_in_flight_requests"]
+	if max_in_flight_requests < 1 {
+		max_in_flight_requests := 1
+	}
+	current_in_flight := dict_get_or(client, "in_flight_requests", 0)
+	if current_in_flight >= max_in_flight_requests {
+		queue_wait_timeout_ms := dict_get_or(resolved_options, "queue_wait_timeout_ms", 0)
+		queue_poll_interval_ms := dict_get_or(resolved_options, "queue_poll_interval_ms", 25)
+		if queue_poll_interval_ms < 1 {
+			queue_poll_interval_ms := 1
+		}
+
+		if queue_wait_timeout_ms > 0 {
+			queue_started_at := current_timestamp()
+			while current_in_flight >= max_in_flight_requests {
+				now_ms := current_timestamp()
+				elapsed_ms := now_ms - queue_started_at
+				if elapsed_ms >= queue_wait_timeout_ms {
+					return standard_error_response_impl(
+						client,
+						"concurrency_queue_timeout",
+						"Timed out waiting for a free in-flight request slot.",
+						429,
+						{
+							"in_flight_requests": current_in_flight,
+							"max_in_flight_requests": max_in_flight_requests,
+							"waited_ms": elapsed_ms,
+							"queue_wait_timeout_ms": queue_wait_timeout_ms
+						},
+						false
+					)
+				}
+				sleep(queue_poll_interval_ms)
+				current_in_flight := dict_get_or(client, "in_flight_requests", 0)
+			}
+		} else {
+		return standard_error_response_impl(
+			client,
+			"concurrency_limit_exceeded",
+			"In-flight request limit exceeded. Wait for active requests to complete or raise max_in_flight_requests.",
+			0,
+			{"in_flight_requests": current_in_flight, "max_in_flight_requests": max_in_flight_requests},
+			false
+		)
+		}
+	}
+	client["in_flight_requests"] := current_in_flight + 1
+
+	max_retries := resolved_options["max_retries"]
+	retry_budget := resolved_options["retry_budget"]
+	if retry_budget < 0 {
+		retry_budget := 0
+	}
+	if retry_budget < max_retries {
+		max_retries := retry_budget
+	}
+	if half_open_probe_mode {
+		half_open_max_retries := dict_get_or(resolved_options, "circuit_breaker_half_open_max_retries", 0)
+		if half_open_max_retries < 0 {
+			half_open_max_retries := 0
+		}
+		if half_open_max_retries < max_retries {
+			max_retries := half_open_max_retries
+		}
+	}
+	base_retry_delay_ms := resolved_options["retry_delay_ms"]
+	retry_jitter_ms := resolved_options["retry_jitter_ms"]
+	max_retry_delay_ms := resolved_options["max_retry_delay_ms"]
+	request_started_at_ms := current_timestamp()
+	deadline_ms := resolve_request_deadline_ms(resolved_options, request_started_at_ms)
+	trace_id := dict_get_or(resolved_options, "trace_id", "")
+	if trace_id == "" {
+		trace_sequence := dict_get_or(client, "trace_sequence", 0) + 1
+		client["trace_sequence"] := trace_sequence
+		trace_id := client["provider"]["name"] + "-trace-" + to_string(request_started_at_ms) + "-" + to_string(trace_sequence)
+	}
+	start_count := 0
+	complete_count := 0
+	retry_count := 0
+	prepared_payload := build_chat_payload_with_resolved(client, messages, options, resolved_options)
+	prepared_budget_error := enforce_request_budgets(client, messages, prepared_payload, resolved_options)
+
+	attempt := 0
+	while attempt <= max_retries {
+		result := execute_request_once(client, messages, options, resolved_options, prepared_payload, prepared_budget_error, attempt, deadline_ms, trace_id)
+		attempt_observability := dict_get_or(result, "observability", {})
+		start_count := start_count + dict_get_or(attempt_observability, "start_count", 0)
+		complete_count := complete_count + dict_get_or(attempt_observability, "complete_count", 0)
+		breaker_state := track_circuit_breaker_result(resolved_options, result, breaker_consecutive_failures)
+		breaker_consecutive_failures := breaker_state["consecutive_failures"]
+		breaker_open_until_ms := breaker_state["open_until_ms"]
+		if breaker_state["opened_now"] {
+			persist_circuit_breaker_state_with_backend(client, resolved_options, breaker_consecutive_failures, breaker_open_until_ms)
+			now_ms := current_timestamp()
+			breaker_error := circuit_breaker_open_response(client, breaker_state["open_until_ms"], now_ms, result)
+			return finalize_chat_completion_result(client, breaker_error, start_count, complete_count, retry_count)
+		}
+
+		if result["ok"] {
+			persist_circuit_breaker_state_with_backend(client, resolved_options, breaker_consecutive_failures, breaker_open_until_ms)
+			return finalize_chat_completion_result(client, result, start_count, complete_count, retry_count)
+		}
+
+		if !should_retry_result(result) {
+			persist_circuit_breaker_state_with_backend(client, resolved_options, breaker_consecutive_failures, breaker_open_until_ms)
+			return finalize_chat_completion_result(client, result, start_count, complete_count, retry_count)
+		}
+
+		if attempt == max_retries {
+			persist_circuit_breaker_state_with_backend(client, resolved_options, breaker_consecutive_failures, breaker_open_until_ms)
+			return finalize_chat_completion_result(client, result, start_count, complete_count, retry_count)
+		}
+
+		delay_ms := compute_retry_delay_ms(attempt, base_retry_delay_ms, max_retry_delay_ms, retry_jitter_ms)
+		retry_count := retry_count + 1
+		retry_hook := dict_get_or(resolved_options, "on_retry", null)
+		if type(retry_hook) == "function" {
+			err_obj := dict_get_or(result, "error", {})
+			event := {
+				"attempt": attempt,
+				"next_attempt": attempt + 1,
+				"delay_ms": delay_ms,
+				"status_code": dict_get_or(result, "status_code", 0),
+				"error_code": dict_get_or(err_obj, "code", "")
+			}
+			emit_hook_safe(retry_hook, event)
+		}
+		sleep(delay_ms)
+		attempt := attempt + 1
+	}
+
+	fallback_result := standard_error_response_impl(
+		client,
+		"internal_error",
+		"Retry loop exhausted unexpectedly.",
+		0,
+		null,
+		false
+	)
+	persist_circuit_breaker_state_with_backend(client, resolved_options, breaker_consecutive_failures, breaker_open_until_ms)
+	return finalize_chat_completion_result(client, fallback_result, start_count, complete_count, retry_count)
+}
+
+func chat_completion_stream_impl(client, messages, options, on_event) {
+	build_callback_event_snapshot := func(event) {
+		if type(event) != "dict" {
+			return {"type": "unknown"}
+		}
+
+		snapshot := {
+			"type": dict_get_or(event, "type", ""),
+			"done": dict_get_or(event, "done", false)
+		}
+		if has_key(event, "delta") {
+			snapshot["delta"] := dict_get_or(event, "delta", "")
+		}
+		if has_key(event, "error") {
+			snapshot["error"] := dict_get_or(event, "error", null)
+		}
+
+		return snapshot
+	}
+
+	build_callback_result_summary := func(base_result) {
+		if type(base_result) != "dict" {
+			return {}
+		}
+
+		summary := {
+			"ok": dict_get_or(base_result, "ok", false),
+			"status_code": dict_get_or(base_result, "status_code", 0)
+		}
+		if has_key(base_result, "error") {
+			summary["error"] := dict_get_or(base_result, "error", null)
+		}
+
+		return summary
+	}
+
+	invoke_callback_safe := func(event, base_result) {
+		callback_error := null
+		try {
+			on_event(event)
+		} except err {
+			callback_error := err
+		}
+
+		if type(callback_error) != "null" {
+			return {
+				"ok": false,
+				"error": callback_error_message(callback_error),
+				"event": build_callback_event_snapshot(event),
+				"base_result": build_callback_result_summary(base_result)
+			}
+		}
+
+		return {
+			"ok": true,
+			"error": ""
+		}
+	}
+
+	stream_options := {}
+	if type(options) == "dict" {
+		for key in keys(options) {
+			stream_options[key] := options[key]
+		}
+	}
+	stream_options["stream"] := true
+
+	result := chat_completion_impl(client, messages, stream_options)
+	emitted_events := []
+
+	if result["ok"] {
+		delta_chunks := []
+		raw := dict_get_or(result, "raw", null)
+		if type(raw) == "dict" {
+			stream_events := dict_get_or(raw, "stream_events", null)
+			if type(stream_events) == "array" {
+				delta_chunks := collect_stream_delta_chunks(stream_events)
+			}
+		}
+
+		if len(delta_chunks) == 0 {
+			delta_chunks := chunk_text_for_stream(result["output_text"])
+		}
+
+		i := 0
+		while i < len(delta_chunks) {
+			event := {
+				"type": "delta",
+				"delta": delta_chunks[i],
+				"done": false
+			}
+			emitted_events := push(emitted_events, event)
+			callback_result := invoke_callback_safe(event, result)
+			if !callback_result["ok"] {
+				callback_failure := standard_error_response_impl(
+					client,
+					"stream_callback_error",
+					"Streaming callback failed: " + callback_result["error"],
+					0,
+					{
+						"event": callback_result["event"],
+						"base_result": callback_result["base_result"],
+						"emitted_events": emitted_events
+					},
+					false
+				)
+				callback_failure["emitted_events"] := emitted_events
+				return callback_failure
+			}
+			i := i + 1
+		}
+
+		done_event := {
+			"type": "done",
+			"delta": "",
+			"done": true,
+			"result": {
+				"ok": dict_get_or(result, "ok", false),
+				"status_code": dict_get_or(result, "status_code", 0),
+				"request_id": dict_get_or(result, "request_id", ""),
+				"finish_reason": dict_get_or(result, "finish_reason", "")
+			}
+		}
+		emitted_events := push(emitted_events, done_event)
+		callback_result := invoke_callback_safe(done_event, result)
+		if !callback_result["ok"] {
+			callback_failure := standard_error_response_impl(
+				client,
+				"stream_callback_error",
+				"Streaming callback failed: " + callback_result["error"],
+				0,
+				{
+					"event": callback_result["event"],
+					"base_result": callback_result["base_result"],
+					"emitted_events": emitted_events
+				},
+				false
+			)
+			callback_failure["emitted_events"] := emitted_events
+			return callback_failure
+		}
+	} else {
+		event := {
+			"type": "error",
+			"error": result["error"],
+			"done": true
+		}
+		emitted_events := push(emitted_events, event)
+		callback_result := invoke_callback_safe(event, result)
+		if !callback_result["ok"] {
+			callback_failure := standard_error_response_impl(
+				client,
+				"stream_callback_error",
+				"Streaming callback failed: " + callback_result["error"],
+				0,
+				{
+					"event": callback_result["event"],
+					"base_result": callback_result["base_result"],
+					"emitted_events": emitted_events
+				},
+				false
+			)
+			callback_failure["emitted_events"] := emitted_events
+			return callback_failure
+		}
+	}
+
+	result["emitted_events"] := emitted_events
+
+	return result
+}
+
+export provider_supports := provider_supports_impl
+export create_client := create_client_impl
+export create_message := create_message_impl
+export build_chat_payload := build_chat_payload_impl
+export standard_error_response := standard_error_response_impl
+export normalize_provider_error := normalize_provider_error_payload
+export parse_json_contract := parse_json_safe
+export parse_sse_contract := parse_sse_lines
+export parse_sse_chunks_contract := parse_sse_chunks
+export should_retry_error_result := should_retry_result
+export retry_delay_contract := compute_retry_delay_ms
+export sdk_contract_version := contract_version_value
+export merge_headers_for_request := merge_headers_with_policy
+export normalize_non_stream_success := normalize_success_response
+export normalize_stream_success := normalize_stream_success_response
+export resolve_options := resolve_chat_options
+export sdk_default_limits := default_limits
+export chat_completion := chat_completion_impl
+export chat_completion_stream := chat_completion_stream_impl
+export embeddings := embeddings_impl

@@ -1,0 +1,62 @@
+test_setup {
+	from src.providers import openai_provider
+	from src.ai_sdk import create_client, standard_error_response, normalize_provider_error
+}
+
+test "raw payloads redact expanded sensitive aliases and nested credentials" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+
+	error_result := standard_error_response(client, "network_error", "boom", 0, {
+		"Authorization": "Bearer sk-secret",
+		"api_key": "top-secret",
+		"clientSecret": "super-secret",
+		"api-key": "legacy-secret",
+		"private_key": "-----BEGIN PRIVATE KEY-----abc-----END PRIVATE KEY-----",
+		"nested": {
+			"token": "abc123",
+			"credentials": {
+				"sessionToken": "sess-value",
+				"refreshToken": "refresh-value"
+			}
+		},
+		"list": [
+			{"idToken": "id-value"},
+			{"meta": {"credential": "cred-value"}}
+		]
+	}, true)
+
+	raw_serialized := to_json(error_result["raw"])
+	assert_true(len(replace(raw_serialized, "[REDACTED]", "")) < len(raw_serialized))
+	assert_equal(len(replace(raw_serialized, "abc123", "")), len(raw_serialized))
+	assert_equal(len(replace(raw_serialized, "super-secret", "")), len(raw_serialized))
+	assert_equal(len(replace(raw_serialized, "refresh-value", "")), len(raw_serialized))
+	assert_equal(len(replace(raw_serialized, "id-value", "")), len(raw_serialized))
+	assert_equal(len(replace(raw_serialized, "cred-value", "")), len(raw_serialized))
+}
+
+test "provider error normalization redacts uncommon credential aliases" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+
+	raw_error := {
+		"error": {
+			"message": "provider failure",
+			"clientSecret": "secret-value",
+			"jwt_token": "jwt-value"
+		},
+		"auth": {
+			"apiKey": "api-value"
+		}
+	}
+
+	result := normalize_provider_error(client, 400, raw_error)
+	assert_false(result["ok"])
+	assert_equal(result["error"]["code"], "provider_error")
+
+	raw_serialized := to_json(result["raw"])
+	assert_true(len(replace(raw_serialized, "[REDACTED]", "")) < len(raw_serialized))
+	assert_equal(len(replace(raw_serialized, "secret-value", "")), len(raw_serialized))
+	assert_equal(len(replace(raw_serialized, "jwt-value", "")), len(raw_serialized))
+	assert_equal(len(replace(raw_serialized, "api-value", "")), len(raw_serialized))
+}

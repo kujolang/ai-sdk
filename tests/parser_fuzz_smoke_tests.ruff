@@ -1,0 +1,58 @@
+test_setup {
+	from src.ai_sdk import parse_json_contract, parse_sse_contract
+}
+
+test "json parser fuzz corpus returns structured parse contract" {
+	corpus := [
+		"",
+		"{",
+		"{\"a\":",
+		"{\"a\":1",
+		"{\"a\":1}",
+		"[]",
+		"null",
+		"true",
+		"123",
+		"{\"nested\":{\"x\":[1,2,3]}}",
+		"{\"items\":[{\"x\":1},{bad}]}"
+	]
+
+	i := 0
+	while i < len(corpus) {
+		parsed := parse_json_contract(corpus[i])
+		assert_true(type(parsed) == "dict")
+		assert_equal(has_key(parsed, "ok"), 1)
+		assert_equal(has_key(parsed, "error"), 1)
+		i := i + 1
+	}
+}
+
+test "sse parser fuzz corpus always returns array" {
+	corpus := [
+		"",
+		"data:",
+		"data: {bad-json}",
+		"event: message\ndata: {\"id\":\"evt-1\"}",
+		"data: [DONE]",
+		"data: {\"id\":\"evt-2\",\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n"
+	]
+
+	i := 0
+	while i < len(corpus) {
+		events := parse_sse_contract(corpus[i])
+		assert_true(type(events) == "array")
+		i := i + 1
+	}
+}
+
+test "sse parser preserves valid frames around malformed frames" {
+	body_text := "data: {\"id\":\"evt-a\",\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n" +
+		"data: {bad}\n\n" +
+		"data: {\"id\":\"evt-b\",\"choices\":[{\"delta\":{\"content\":\"b\"}}]}\n\n" +
+		"data: [DONE]"
+
+	events := parse_sse_contract(body_text)
+	assert_equal(len(events), 2)
+	assert_equal(events[0]["id"], "evt-a")
+	assert_equal(events[1]["id"], "evt-b")
+}

@@ -1,0 +1,33 @@
+from src.providers import openai_provider
+from src.ai_sdk import create_client, chat_completion
+
+print("Kujo AI SDK Stress Harness")
+print("--------------------------")
+
+provider := openai_provider()
+client := create_client(provider, "fixture-key")
+
+iterations := 3000
+ok_count := 0
+error_count := 0
+
+for i in range(0, iterations) {
+	result := chat_completion(client, [], {"offline_fixture": true})
+	if result["ok"] {
+		ok_count := ok_count + 1
+	} else {
+		error_count := error_count + 1
+	}
+
+	# Progress output at every 500 iterations to observe runtime behavior.
+	if i > 0 {
+		if i % 500 == 0 {
+			print("Progress: " + to_string(i) + " / " + to_string(iterations))
+		}
+	}
+}
+
+print("")
+print("Completed stress pass")
+print("Success responses: " + to_string(ok_count))
+print("Error responses: " + to_string(error_count))

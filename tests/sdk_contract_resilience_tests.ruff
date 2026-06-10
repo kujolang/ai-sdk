@@ -1,0 +1,945 @@
+test_setup {
+	from src.providers import openai_provider, deepseek_provider, custom_openai_compatible_provider, custom_openai_compatible_provider_with_options
+	from src.ai_sdk import create_client, create_message, build_chat_payload, chat_completion, chat_completion_stream, embeddings, provider_supports, standard_error_response, normalize_provider_error, parse_json_contract, parse_sse_contract, should_retry_error_result, retry_delay_contract, merge_headers_for_request, normalize_non_stream_success, normalize_stream_success, resolve_options, sdk_default_limits, sdk_contract_version
+}
+
+test "resolve_options applies defaults and selected overrides" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+
+	defaults := resolve_options(client, null)
+	assert_equal(defaults["model"], provider["default_model"])
+	assert_equal(defaults["temperature"], 0.2)
+	assert_equal(defaults["max_tokens"], 400)
+	assert_equal(defaults["max_retries"], 2)
+	assert_equal(defaults["retry_budget"], 2)
+	assert_equal(defaults["retry_jitter_ms"], 0)
+	assert_equal(defaults["retry_delay_ms"], 300)
+	assert_equal(defaults["max_retry_delay_ms"], 4000)
+	assert_equal(defaults["timeout"], 45.0)
+	assert_equal(defaults["connect_timeout"], 10.0)
+	assert_equal(defaults["read_timeout"], 45.0)
+	assert_equal(defaults["overall_timeout_ms"], 0)
+	assert_equal(defaults["deadline_ms"], 0)
+	assert_equal(type(defaults["structured_output_schema"]), "null")
+	assert_true(defaults["structured_output_retryable"])
+	assert_equal(type(defaults["fallback_providers"]), "array")
+	assert_equal(len(defaults["fallback_providers"]), 0)
+	assert_false(defaults["circuit_breaker_enabled"])
+	assert_equal(defaults["circuit_breaker_error_threshold"], 5)
+	assert_equal(defaults["circuit_breaker_cooldown_ms"], 15000)
+	assert_true(defaults["circuit_breaker_half_open_enabled"])
+	assert_equal(defaults["circuit_breaker_half_open_max_retries"], 0)
+	assert_equal(type(defaults["state_backend"]), "null")
+	assert_equal(defaults["state_namespace"], "")
+	assert_equal(defaults["max_prompt_characters"], 20000)
+	assert_equal(defaults["max_tools_per_request"], 32)
+	assert_equal(defaults["max_in_flight_requests"], 4)
+	assert_equal(defaults["queue_wait_timeout_ms"], 0)
+	assert_equal(defaults["queue_poll_interval_ms"], 25)
+	assert_equal(defaults["max_total_tokens_per_request"], 0)
+	assert_equal(defaults["rolling_token_budget_tokens"], 0)
+	assert_equal(defaults["rolling_cost_budget_cents"], 0.0)
+	assert_equal(defaults["estimated_cost_per_1k_tokens_cents"], 0.0)
+	assert_equal(defaults["trace_id"], "")
+	assert_false(defaults["offline_fixture"])
+
+	overrides := resolve_options(client, {
+		"model": "gpt-4.1",
+		"temperature": 0.5,
+		"max_tokens": 120,
+		"max_retries": 4,
+		"retry_budget": 1,
+		"retry_jitter_ms": 12,
+		"retry_delay_ms": 150,
+		"max_retry_delay_ms": 1200,
+		"timeout": 12.0,
+		"connect_timeout": 3.0,
+		"read_timeout": 8.0,
+		"overall_timeout_ms": 2500,
+		"deadline_ms": 123456,
+		"structured_output_schema": {"required": ["answer"]},
+		"structured_output_retryable": false,
+		"fallback_providers": [{"provider": openai_provider()}],
+		"circuit_breaker_enabled": true,
+		"circuit_breaker_error_threshold": 3,
+		"circuit_breaker_cooldown_ms": 5000,
+		"circuit_breaker_half_open_enabled": false,
+		"circuit_breaker_half_open_max_retries": 1,
+		"state_backend": {},
+		"state_namespace": "tenant-a",
+		"max_prompt_characters": 99,
+		"max_tools_per_request": 5,
+		"max_in_flight_requests": 2,
+		"queue_wait_timeout_ms": 200,
+		"queue_poll_interval_ms": 10,
+		"max_total_tokens_per_request": 500,
+		"rolling_token_budget_tokens": 1000,
+		"rolling_cost_budget_cents": 250.0,
+		"estimated_cost_per_1k_tokens_cents": 8.5,
+		"trace_id": "trace-override",
+		"offline_fixture": true,
+		"allow_unsafe_header_override": true
+	})
+	assert_equal(overrides["model"], "gpt-4.1")
+	assert_equal(overrides["temperature"], 0.5)
+	assert_equal(overrides["max_tokens"], 120)
+	assert_equal(overrides["max_retries"], 4)
+	assert_equal(overrides["retry_budget"], 1)
+	assert_equal(overrides["retry_jitter_ms"], 12)
+	assert_equal(overrides["retry_delay_ms"], 150)
+	assert_equal(overrides["max_retry_delay_ms"], 1200)
+	assert_equal(overrides["timeout"], 12.0)
+	assert_equal(overrides["connect_timeout"], 3.0)
+	assert_equal(overrides["read_timeout"], 8.0)
+	assert_equal(overrides["overall_timeout_ms"], 2500)
+	assert_equal(overrides["deadline_ms"], 123456)
+	assert_equal(type(overrides["structured_output_schema"]), "dict")
+	assert_false(overrides["structured_output_retryable"])
+	assert_equal(type(overrides["fallback_providers"]), "array")
+	assert_equal(len(overrides["fallback_providers"]), 1)
+	assert_true(overrides["circuit_breaker_enabled"])
+	assert_equal(overrides["circuit_breaker_error_threshold"], 3)
+	assert_equal(overrides["circuit_breaker_cooldown_ms"], 5000)
+	assert_false(overrides["circuit_breaker_half_open_enabled"])
+	assert_equal(overrides["circuit_breaker_half_open_max_retries"], 1)
+	assert_equal(type(overrides["state_backend"]), "dict")
+	assert_equal(overrides["state_namespace"], "tenant-a")
+	assert_equal(overrides["max_prompt_characters"], 99)
+	assert_equal(overrides["max_tools_per_request"], 5)
+	assert_equal(overrides["max_in_flight_requests"], 2)
+	assert_equal(overrides["queue_wait_timeout_ms"], 200)
+	assert_equal(overrides["queue_poll_interval_ms"], 10)
+	assert_equal(overrides["max_total_tokens_per_request"], 500)
+	assert_equal(overrides["rolling_token_budget_tokens"], 1000)
+	assert_equal(overrides["rolling_cost_budget_cents"], 250.0)
+	assert_equal(overrides["estimated_cost_per_1k_tokens_cents"], 8.5)
+	assert_equal(overrides["trace_id"], "trace-override")
+	assert_true(overrides["offline_fixture"])
+	assert_true(overrides["allow_unsafe_header_override"])
+}
+
+test "stream normalization supports structured delta content variants" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+
+	stream_events := [
+		{
+			"id": "stream-1",
+			"model": "gpt-4.1-mini",
+			"choices": [
+				{
+					"delta": {
+						"content": [
+							{"text": "Hello "},
+							{"content": "world"},
+							{"content": "!"}
+						]
+					},
+					"finish_reason": ""
+				}
+			]
+		},
+		{
+			"choices": [
+				{
+					"delta": {
+						"content": ""
+					},
+					"finish_reason": "stop"
+				}
+			]
+		}
+	]
+
+	result := normalize_stream_success(client, 200, stream_events, "fallback-model")
+	assert_true(result["ok"])
+	assert_equal(result["output_text"], "Hello world!")
+	assert_equal(result["finish_reason"], "stop")
+}
+
+test "sdk default constants are centralized and stable" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+	defaults := sdk_default_limits()
+	resolved := resolve_options(client, null)
+
+	assert_equal(defaults["temperature"], 0.2)
+	assert_equal(defaults["max_tokens"], 400)
+	assert_equal(defaults["max_retries"], 2)
+	assert_equal(defaults["retry_budget"], 2)
+	assert_equal(defaults["retry_jitter_ms"], 0)
+	assert_equal(defaults["retry_delay_ms"], 300)
+	assert_equal(defaults["max_retry_delay_ms"], 4000)
+	assert_equal(defaults["timeout"], 45.0)
+	assert_equal(defaults["connect_timeout"], 10.0)
+	assert_equal(defaults["read_timeout"], 45.0)
+	assert_equal(defaults["overall_timeout_ms"], 0)
+	assert_equal(defaults["deadline_ms"], 0)
+	assert_equal(type(defaults["structured_output_schema"]), "null")
+	assert_true(defaults["structured_output_retryable"])
+	assert_equal(type(defaults["fallback_providers"]), "array")
+	assert_equal(len(defaults["fallback_providers"]), 0)
+	assert_false(defaults["circuit_breaker_enabled"])
+	assert_equal(defaults["circuit_breaker_error_threshold"], 5)
+	assert_equal(defaults["circuit_breaker_cooldown_ms"], 15000)
+	assert_true(defaults["circuit_breaker_half_open_enabled"])
+	assert_equal(defaults["circuit_breaker_half_open_max_retries"], 0)
+	assert_equal(type(defaults["state_backend"]), "null")
+	assert_equal(defaults["state_namespace"], "")
+	assert_equal(defaults["max_prompt_characters"], 20000)
+	assert_equal(defaults["max_tools_per_request"], 32)
+	assert_equal(defaults["max_in_flight_requests"], 4)
+	assert_equal(defaults["queue_wait_timeout_ms"], 0)
+	assert_equal(defaults["queue_poll_interval_ms"], 25)
+	assert_equal(defaults["max_total_tokens_per_request"], 0)
+	assert_equal(defaults["rolling_token_budget_tokens"], 0)
+	assert_equal(defaults["rolling_cost_budget_cents"], 0.0)
+	assert_equal(defaults["estimated_cost_per_1k_tokens_cents"], 0.0)
+	assert_equal(defaults["trace_id"], "")
+
+	assert_equal(resolved["temperature"], defaults["temperature"])
+	assert_equal(resolved["max_tokens"], defaults["max_tokens"])
+	assert_equal(resolved["max_retries"], defaults["max_retries"])
+	assert_equal(resolved["retry_budget"], defaults["retry_budget"])
+	assert_equal(resolved["retry_jitter_ms"], defaults["retry_jitter_ms"])
+	assert_equal(resolved["retry_delay_ms"], defaults["retry_delay_ms"])
+	assert_equal(resolved["max_retry_delay_ms"], defaults["max_retry_delay_ms"])
+	assert_equal(resolved["timeout"], defaults["timeout"])
+	assert_equal(resolved["connect_timeout"], defaults["connect_timeout"])
+	assert_equal(resolved["read_timeout"], defaults["read_timeout"])
+	assert_equal(resolved["overall_timeout_ms"], defaults["overall_timeout_ms"])
+	assert_equal(resolved["deadline_ms"], defaults["deadline_ms"])
+	assert_equal(type(resolved["structured_output_schema"]), "null")
+	assert_equal(resolved["structured_output_retryable"], defaults["structured_output_retryable"])
+	assert_equal(type(resolved["fallback_providers"]), "array")
+	assert_equal(len(resolved["fallback_providers"]), 0)
+	assert_equal(resolved["circuit_breaker_enabled"], defaults["circuit_breaker_enabled"])
+	assert_equal(resolved["circuit_breaker_error_threshold"], defaults["circuit_breaker_error_threshold"])
+	assert_equal(resolved["circuit_breaker_cooldown_ms"], defaults["circuit_breaker_cooldown_ms"])
+	assert_equal(resolved["circuit_breaker_half_open_enabled"], defaults["circuit_breaker_half_open_enabled"])
+	assert_equal(resolved["circuit_breaker_half_open_max_retries"], defaults["circuit_breaker_half_open_max_retries"])
+	assert_equal(type(resolved["state_backend"]), "null")
+	assert_equal(resolved["state_namespace"], "")
+	assert_equal(resolved["max_prompt_characters"], defaults["max_prompt_characters"])
+	assert_equal(resolved["max_tools_per_request"], defaults["max_tools_per_request"])
+	assert_equal(resolved["max_in_flight_requests"], defaults["max_in_flight_requests"])
+	assert_equal(resolved["queue_wait_timeout_ms"], defaults["queue_wait_timeout_ms"])
+	assert_equal(resolved["queue_poll_interval_ms"], defaults["queue_poll_interval_ms"])
+	assert_equal(resolved["max_total_tokens_per_request"], defaults["max_total_tokens_per_request"])
+	assert_equal(resolved["rolling_token_budget_tokens"], defaults["rolling_token_budget_tokens"])
+	assert_equal(resolved["rolling_cost_budget_cents"], defaults["rolling_cost_budget_cents"])
+	assert_equal(resolved["estimated_cost_per_1k_tokens_cents"], defaults["estimated_cost_per_1k_tokens_cents"])
+	assert_equal(resolved["trace_id"], defaults["trace_id"])
+}
+
+test "retry_budget caps retries below max_retries" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+	messages := [create_message("user", "retry ceiling")]
+	state := {
+		"calls": 0
+	}
+
+	transport_fails := func(url, request_options) {
+		state["calls"] := state["calls"] + 1
+		return Err("transient timeout")
+	}
+
+	result := chat_completion(client, messages, {
+		"transport": transport_fails,
+		"max_retries": 5,
+		"retry_budget": 1,
+		"retry_delay_ms": 1
+	})
+
+	assert_false(result["ok"])
+	assert_equal(result["error"]["code"], "network_error")
+	assert_equal(result["observability"]["retry_count"], 1)
+	assert_equal(result["observability"]["start_count"], 2)
+}
+
+test "retry jitter contributes deterministic delay value" {
+	delay_no_jitter := retry_delay_contract(0, 10, 5000, 0)
+	delay_with_jitter := retry_delay_contract(0, 10, 5000, 11)
+	delay_capped := retry_delay_contract(3, 800, 1000, 500)
+
+	assert_equal(delay_no_jitter, 10)
+	assert_equal(delay_with_jitter, 11)
+	assert_equal(delay_capped, 1000)
+}
+
+test "circuit breaker opens after consecutive retryable failures" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+	messages := [create_message("user", "breaker")]
+
+	always_retryable_fail := func(url, request_options) {
+		return Err("timeout")
+	}
+
+	result := chat_completion(client, messages, {
+		"transport": always_retryable_fail,
+		"max_retries": 5,
+		"circuit_breaker_enabled": true,
+		"circuit_breaker_error_threshold": 2,
+		"circuit_breaker_cooldown_ms": 5000
+	})
+	assert_false(result["ok"])
+	assert_equal(result["error"]["code"], "circuit_breaker_open")
+	assert_equal(result["observability"]["start_count"], 2)
+	assert_equal(result["observability"]["complete_count"], 2)
+	assert_equal(result["observability"]["retry_count"], 1)
+}
+
+test "overall deadline short-circuits request execution" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+	messages := [create_message("user", "deadline")]
+
+	transport_should_not_run := func(url, request_options) {
+		return Ok({
+			"_status": 200,
+			"_body": "{\"choices\":[{\"message\":{\"content\":\"late\"}}]}"
+		})
+	}
+
+	result := chat_completion(client, messages, {
+		"transport": transport_should_not_run,
+		"max_retries": 3,
+		"deadline_ms": 1
+	})
+
+	assert_false(result["ok"])
+	assert_equal(result["error"]["code"], "deadline_exceeded")
+	assert_equal(result["status_code"], 408)
+}
+
+test "half-open circuit breaker allows probe then re-opens on failure" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+	messages := [create_message("user", "half-open probe")]
+	client["circuit_breaker_open_until_ms"] := current_timestamp() + 10000
+
+	blocked_result := chat_completion(client, messages, {
+		"transport": func(url, request_options) {
+			return Ok({
+				"_status": 200,
+				"_body": "{\"id\":\"unexpected\",\"model\":\"gpt-4.1-mini\",\"choices\":[{\"message\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}"
+			})
+		},
+		"circuit_breaker_enabled": true,
+		"circuit_breaker_error_threshold": 2,
+		"circuit_breaker_cooldown_ms": 5000
+	})
+	assert_false(blocked_result["ok"])
+	assert_equal(blocked_result["error"]["code"], "circuit_breaker_open")
+
+	client["circuit_breaker_open_until_ms"] := current_timestamp() - 1
+	probe_result := chat_completion(client, messages, {
+		"transport": func(url, request_options) {
+			return Err("probe timeout")
+		},
+		"max_retries": 5,
+		"circuit_breaker_enabled": true,
+		"circuit_breaker_error_threshold": 2,
+		"circuit_breaker_cooldown_ms": 5000,
+		"circuit_breaker_half_open_enabled": true,
+		"circuit_breaker_half_open_max_retries": 0
+	})
+	assert_false(probe_result["ok"])
+	assert_equal(probe_result["error"]["code"], "circuit_breaker_open")
+	assert_equal(probe_result["observability"]["start_count"], 1)
+	assert_equal(probe_result["observability"]["complete_count"], 1)
+	assert_equal(probe_result["observability"]["retry_count"], 0)
+}
+
+test "state backend enables shared breaker state across clients" {
+	provider := openai_provider()
+	client_b := create_client(provider, "fixture-key")
+	messages := [create_message("user", "shared breaker")]
+	backend := {
+		"state": {
+			"ai_sdk:shared-breaker:breaker_consecutive_failures": 1,
+			"ai_sdk:shared-breaker:breaker_open_until_ms": 0
+		}
+	}
+
+	always_timeout := func(url, request_options) {
+		return Err("timeout")
+	}
+
+	second_result := chat_completion(client_b, messages, {
+		"transport": always_timeout,
+		"max_retries": 0,
+		"state_backend": backend,
+		"state_namespace": "shared-breaker",
+		"circuit_breaker_enabled": true,
+		"circuit_breaker_error_threshold": 2,
+		"circuit_breaker_cooldown_ms": 5000
+	})
+	assert_false(second_result["ok"])
+	assert_equal(second_result["error"]["code"], "circuit_breaker_open")
+}
+
+test "request prompt budget fails fast before transport" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+	messages := [create_message("user", "0123456789")]
+
+	transport_should_not_run := func(url, request_options) {
+		return Ok({
+			"_status": 200,
+			"_body": "{\"id\":\"unexpected\",\"choices\":[]}" 
+		})
+	}
+
+	result := chat_completion(client, messages, {
+		"transport": transport_should_not_run,
+		"max_prompt_characters": 5,
+		"max_retries": 0
+	})
+
+	assert_false(result["ok"])
+	assert_equal(result["error"]["code"], "request_budget_exceeded")
+}
+
+test "request tool budget fails when tools exceed configured ceiling" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+	messages := [create_message("user", "tool budget")]
+
+	tools := [
+		{"type": "function", "function": {"name": "t1"}},
+		{"type": "function", "function": {"name": "t2"}}
+	]
+
+	result := chat_completion(client, messages, {
+		"offline_fixture": false,
+		"max_tools_per_request": 1,
+		"tools": tools,
+		"transport": func(url, request_options) {
+			return Ok({"_status": 200, "_body": "{}"})
+		},
+		"max_retries": 0
+	})
+
+	assert_false(result["ok"])
+	assert_equal(result["error"]["code"], "request_budget_exceeded")
+}
+
+test "max_in_flight_requests blocks calls when client slot is saturated" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+	client["in_flight_requests"] := 1
+	messages := [create_message("user", "concurrency")]
+
+	result := chat_completion(client, messages, {
+		"max_in_flight_requests": 1,
+		"max_retries": 0,
+		"transport": func(url, request_options) {
+			return Ok({
+				"_status": 200,
+				"_body": "{\"id\":\"x\",\"choices\":[{\"message\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}"
+			})
+		}
+	})
+
+	assert_false(result["ok"])
+	assert_equal(result["error"]["code"], "concurrency_limit_exceeded")
+}
+
+test "queue-based admission control times out when slot never frees" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+	client["in_flight_requests"] := 1
+	messages := [create_message("user", "queue-timeout")]
+
+	result := chat_completion(client, messages, {
+		"max_in_flight_requests": 1,
+		"queue_wait_timeout_ms": 1,
+		"queue_poll_interval_ms": 1,
+		"max_retries": 0,
+		"transport": func(url, request_options) {
+			return Ok({
+				"_status": 200,
+				"_body": "{\"id\":\"x\",\"choices\":[{\"message\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}"
+			})
+		}
+	})
+
+	assert_false(result["ok"])
+	assert_equal(result["error"]["code"], "concurrency_queue_timeout")
+	assert_equal(result["status_code"], 429)
+}
+
+test "governance rejects request when per-request token budget is exceeded" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+	messages := [create_message("user", "This prompt is intentionally long for governance testing")]
+
+	result := chat_completion(client, messages, {
+		"max_total_tokens_per_request": 5,
+		"max_retries": 0,
+		"transport": func(url, request_options) {
+			return Ok({
+				"_status": 200,
+				"_body": "{\"choices\":[{\"message\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}"
+			})
+		}
+	})
+
+	assert_false(result["ok"])
+	assert_equal(result["error"]["code"], "governance_budget_exceeded")
+	assert_equal(result["status_code"], 429)
+	assert_equal(result["raw"]["budget_type"], "per_request_tokens")
+}
+
+test "governance rejects request when rolling token budget is already exhausted" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+	messages := [create_message("user", "rolling token budget")]
+	backend := {
+		"state": {
+			"ai_sdk:govtest:governance_tokens_used": 50
+		}
+	}
+
+	result := chat_completion(client, messages, {
+		"rolling_token_budget_tokens": 50,
+		"state_backend": backend,
+		"state_namespace": "govtest",
+		"max_retries": 0,
+		"transport": func(url, request_options) {
+			return Ok({
+				"_status": 200,
+				"_body": "{\"choices\":[{\"message\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}"
+			})
+		}
+	})
+
+	assert_false(result["ok"])
+	assert_equal(result["error"]["code"], "governance_budget_exceeded")
+	assert_equal(result["raw"]["budget_type"], "rolling_tokens")
+}
+
+test "governance rejects request when rolling cost budget would be exceeded" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+	messages := [create_message("user", "rolling cost budget")]
+
+	result := chat_completion(client, messages, {
+		"rolling_cost_budget_cents": 0.01,
+		"estimated_cost_per_1k_tokens_cents": 100.0,
+		"max_retries": 0,
+		"transport": func(url, request_options) {
+			return Ok({
+				"_status": 200,
+				"_body": "{\"choices\":[{\"message\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":10,\"total_tokens\":20}}"
+			})
+		}
+	})
+
+	assert_false(result["ok"])
+	assert_equal(result["error"]["code"], "governance_budget_exceeded")
+	assert_equal(result["raw"]["budget_type"], "rolling_cost")
+}
+
+test "retry classification handles status boundaries deterministically" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+
+	http_429 := standard_error_response(client, "http_error", "HTTP 429", 429, null, false)
+	http_499 := standard_error_response(client, "http_error", "HTTP 499", 499, null, true)
+	http_500 := standard_error_response(client, "http_error", "HTTP 500", 500, null, false)
+	http_599 := standard_error_response(client, "http_error", "HTTP 599", 599, null, false)
+
+	assert_true(should_retry_error_result(http_429))
+	assert_false(should_retry_error_result(http_499))
+	assert_true(should_retry_error_result(http_500))
+	assert_true(should_retry_error_result(http_599))
+}
+
+test "retry classification honors retryable fallback for non-http errors" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+
+	transport_retryable := standard_error_response(client, "transport_error", "transient", 0, null, true)
+	transport_non_retryable := standard_error_response(client, "transport_error", "fatal", 0, null, false)
+	provider_non_retryable := standard_error_response(client, "provider_error", "invalid_request", 400, null, false)
+
+	assert_true(should_retry_error_result(transport_retryable))
+	assert_false(should_retry_error_result(transport_non_retryable))
+	assert_false(should_retry_error_result(provider_non_retryable))
+}
+
+test "parse_json_contract handles empty and malformed payloads" {
+	empty_result := parse_json_contract("")
+	assert_false(empty_result["ok"])
+	assert_equal(empty_result["error"], "empty body")
+
+	malformed_result := parse_json_contract("{")
+	assert_false(malformed_result["ok"])
+	assert_true(len(malformed_result["error"]) > 0)
+}
+
+test "provider error normalization tolerates non-dict error shapes" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+
+	raw_error := {
+		"error": "provider-bad-shape"
+	}
+	result := normalize_provider_error(client, 400, raw_error)
+	assert_false(result["ok"])
+	assert_equal(result["error"]["code"], "provider_error")
+	assert_equal(result["error"]["message"], "Provider returned an error")
+}
+
+test "raw payloads redact sensitive keys and bearer tokens" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+
+	error_result := standard_error_response(client, "network_error", "boom", 0, {
+		"Authorization": "Bearer sk-secret",
+		"api_key": "top-secret",
+		"nested": {
+			"token": "abc123"
+		}
+	}, true)
+
+	raw_serialized := to_json(error_result["raw"])
+	assert_true(len(replace(raw_serialized, "[REDACTED]", "")) < len(raw_serialized))
+	assert_equal(len(replace(raw_serialized, "top-secret", "")), len(raw_serialized))
+	assert_equal(len(replace(raw_serialized, "abc123", "")), len(raw_serialized))
+}
+
+test "usage normalization handles total-only payload variant" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+
+	total_only_usage := {
+		"choices": [{"message": {"content": "ok"}}],
+		"usage": {
+			"total_tokens": 77
+		}
+	}
+	result := normalize_non_stream_success(client, 200, total_only_usage, "fallback-model")
+	assert_equal(result["usage"]["input_tokens"], 0)
+	assert_equal(result["usage"]["output_tokens"], 0)
+	assert_equal(result["usage"]["total_tokens"], 77)
+}
+
+test "sse parser supports multiline data frames and done markers" {
+	body := "data: {\"id\":\"evt-1\",\"model\":\"gpt-4.1-mini\",\"choices\":[{\"delta\":{\"content\":\"Hello\"},\"finish_reason\":\"\"}]}\n\n"
+	body := body + "data: {\"id\":\"evt-2\",\"choices\":[{\"delta\":{\"content\":\" world\"},\"finish_reason\":\"stop\"}]}\n"
+	body := body + "data: [DONE]\n"
+	body := body + "data: {\"id\":\"evt-3\",\"choices\":[]}\n"
+
+	parsed_events := parse_sse_contract(body)
+	assert_equal(len(parsed_events), 2)
+	assert_equal(parsed_events[0]["id"], "evt-1")
+	assert_equal(parsed_events[1]["id"], "evt-2")
+}
+
+test "stream normalization handles no-delta events" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+
+	stream_events := [
+		{
+			"id": "evt-1",
+			"choices": [
+				{
+					"delta": {},
+					"finish_reason": "stop"
+				}
+			]
+		}
+	]
+
+	result := normalize_stream_success(client, 200, stream_events, "fallback-model")
+	assert_true(result["ok"])
+	assert_equal(result["output_text"], "")
+	assert_equal(result["finish_reason"], "stop")
+}
+
+test "streaming returns normalized error when callback throws on done event" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+	messages := [create_message("user", "Stream this")]
+
+	handler := func(event) {
+		if event["type"] == "done" {
+			parse_json("{")
+		}
+	}
+
+	result := chat_completion_stream(client, messages, {"offline_fixture": true}, handler)
+	assert_false(result["ok"])
+	assert_equal(result["error"]["code"], "stream_callback_error")
+	assert_true(type(result["emitted_events"]) == "array")
+	assert_true(len(result["emitted_events"]) > 0)
+}
+
+test "chat_completion supports injected transport success path" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+	messages := [create_message("user", "transport-hook")]
+
+	transport_ok := func(url, request_options) {
+		return Ok({
+			"_status": 200,
+			"_body": "{\"id\":\"transport-1\",\"model\":\"gpt-4.1-mini\",\"choices\":[{\"message\":{\"content\":\"hooked-response\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":2,\"total_tokens\":3}}"
+		})
+	}
+
+	result := chat_completion(client, messages, {
+		"transport": transport_ok,
+		"max_retries": 0
+	})
+	assert_true(result["ok"])
+	assert_equal(result["output_text"], "hooked-response")
+	assert_equal(result["usage"]["total_tokens"], 3)
+}
+
+test "chat_completion stream parses incremental chunked SSE responses" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+	messages := [create_message("user", "stream-chunks")]
+
+	chunked_stream_transport := func(url, request_options) {
+		return Ok({
+			"_status": 200,
+			"_body": "",
+			"_stream_chunks": [
+				"data: {\"id\":\"evt-1\",\"choices\":[{\"delta\":{\"content\":\"Hel",
+				"lo\"},\"finish_reason\":\"\"}]}\n\n",
+				"data: {\"id\":\"evt-2\",\"choices\":[{\"delta\":{\"content\":\" world\"},\"finish_reason\":\"stop\"}]}\n\n",
+				"data: [DONE]\n\n"
+			]
+		})
+	}
+
+	result := chat_completion(client, messages, {
+		"transport": chunked_stream_transport,
+		"max_retries": 0,
+		"stream": true
+	})
+
+	assert_true(result["ok"])
+	assert_equal(result["output_text"], "Hello world")
+	assert_equal(result["finish_reason"], "stop")
+	assert_true(type(result["raw"]["stream_events"]) == "array")
+	assert_equal(len(result["raw"]["stream_events"]), 2)
+}
+
+test "chat_completion supports injected transport error path" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+	messages := [create_message("user", "transport-hook")]
+
+	transport_error := func(url, request_options) {
+		return Err("mock transport failure")
+	}
+
+	result := chat_completion(client, messages, {
+		"transport": transport_error,
+		"max_retries": 0
+	})
+	assert_false(result["ok"])
+	assert_equal(result["error"]["code"], "network_error")
+}
+
+test "structured output mode fails deterministicly on non-json output" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+	messages := [create_message("user", "return plain text")]
+
+	transport_plain_text := func(url, request_options) {
+		return Ok({
+			"_status": 200,
+			"_body": "{\"id\":\"structured-1\",\"choices\":[{\"message\":{\"content\":\"not-json\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}"
+		})
+	}
+
+	result := chat_completion(client, messages, {
+		"transport": transport_plain_text,
+		"max_retries": 0,
+		"structured_output_schema": {
+			"required": ["answer"]
+		}
+	})
+
+	assert_false(result["ok"])
+	assert_equal(result["error"]["code"], "structured_output_invalid")
+	assert_equal(result["status_code"], 422)
+}
+
+test "structured output mode succeeds when required fields are present" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+	messages := [create_message("user", "return json")]
+
+	transport_structured_json := func(url, request_options) {
+		return Ok({
+			"_status": 200,
+			"_body": "{\"id\":\"structured-2\",\"choices\":[{\"message\":{\"content\":\"{\\\"answer\\\":\\\"ok\\\"}\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}"
+		})
+	}
+
+	result := chat_completion(client, messages, {
+		"transport": transport_structured_json,
+		"max_retries": 0,
+		"structured_output_schema": {
+			"required": ["answer"]
+		}
+	})
+
+	assert_true(result["ok"])
+	assert_equal(result["output_text"], "{\"answer\":\"ok\"}")
+}
+
+test "provider fallback succeeds on retryable primary failure" {
+	provider := openai_provider()
+	fallback_provider := custom_openai_compatible_provider("https://fallback.example/v1", "FALLBACK_API_KEY", "fallback-model")
+	client := create_client(provider, "fixture-key")
+	messages := [create_message("user", "fallback")]
+
+	transport_with_fallback := func(url, request_options) {
+		if starts_with(url, "https://api.openai.com/v1") {
+			return Err("primary timeout")
+		}
+		if starts_with(url, "https://fallback.example/v1") {
+			return Ok({
+				"_status": 200,
+				"_body": "{\"id\":\"fallback-1\",\"model\":\"fallback-model\",\"choices\":[{\"message\":{\"content\":\"fallback-ok\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}"
+			})
+		}
+		return Err("unexpected url")
+	}
+
+	result := chat_completion(client, messages, {
+		"transport": transport_with_fallback,
+		"max_retries": 0,
+		"fallback_providers": [
+			{"provider": fallback_provider}
+		]
+	})
+
+	assert_true(result["ok"])
+	assert_equal(result["output_text"], "fallback-ok")
+	assert_true(has_key(result, "fallback") == 1)
+	assert_equal(result["fallback"]["provider"], "openai-compatible")
+}
+
+test "provider fallback is skipped on non-retryable primary error" {
+	provider := openai_provider()
+	fallback_provider := custom_openai_compatible_provider("https://fallback.example/v1", "FALLBACK_API_KEY", "fallback-model")
+	client := create_client(provider, "fixture-key")
+	messages := [create_message("user", "fallback-skip")]
+
+	transport_primary_http_400 := func(url, request_options) {
+		if starts_with(url, "https://api.openai.com/v1") {
+			return Ok({
+				"_status": 400,
+				"_body": "{\"error\":{\"message\":\"bad request\"}}"
+			})
+		}
+		return Ok({
+			"_status": 200,
+			"_body": "{\"choices\":[{\"message\":{\"content\":\"should-not-run\"},\"finish_reason\":\"stop\"}]}"
+		})
+	}
+
+	result := chat_completion(client, messages, {
+		"transport": transport_primary_http_400,
+		"max_retries": 0,
+		"fallback_providers": [
+			{"provider": fallback_provider}
+		]
+	})
+
+	assert_false(result["ok"])
+	assert_equal(result["error"]["code"], "http_error")
+	assert_equal(has_key(result, "fallback"), 0)
+}
+
+test "observability hooks emit request start and complete events" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+	messages := [create_message("user", "observe")]
+	metrics := {
+		"start_count": 0,
+		"complete_count": 0,
+		"last_status": 0
+	}
+
+	on_start := func(event) {
+		metrics["start_count"] := metrics["start_count"] + 1
+	}
+	on_complete := func(event) {
+		metrics["complete_count"] := metrics["complete_count"] + 1
+		metrics["last_status"] := event["status_code"]
+	}
+	transport_ok := func(url, request_options) {
+		return Ok({
+			"_status": 200,
+			"_body": "{\"id\":\"obs-1\",\"model\":\"gpt-4.1-mini\",\"choices\":[{\"message\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}"
+		})
+	}
+
+	result := chat_completion(client, messages, {
+		"transport": transport_ok,
+		"on_request_start": on_start,
+		"on_request_complete": on_complete,
+		"max_retries": 0
+	})
+	assert_true(result["ok"])
+	assert_equal(result["observability"]["start_count"], 1)
+	assert_equal(result["observability"]["complete_count"], 1)
+	assert_equal(result["observability"]["retry_count"], 0)
+	assert_equal(result["status_code"], 200)
+	assert_true(len(result["observability"]["trace_id"]) > 0)
+	assert_true(len(result["observability"]["request_id"]) > 0)
+	assert_true(result["observability"]["duration_ms"] >= 0)
+}
+
+test "observability hooks emit retry events" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+	messages := [create_message("user", "observe-retry")]
+	metrics := {
+		"retry_count": 0,
+		"calls": 0,
+		"last_delay": 0
+	}
+
+	on_retry := func(event) {
+		metrics["retry_count"] := metrics["retry_count"] + 1
+		metrics["last_delay"] := event["delay_ms"]
+	}
+	transport_retry := func(url, request_options) {
+		metrics["calls"] := metrics["calls"] + 1
+		if metrics["calls"] == 1 {
+			return Err("transient timeout")
+		}
+		return Ok({
+			"_status": 200,
+			"_body": "{\"id\":\"obs-2\",\"model\":\"gpt-4.1-mini\",\"choices\":[{\"message\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}"
+		})
+	}
+
+	result := chat_completion(client, messages, {
+		"transport": transport_retry,
+		"on_retry": on_retry,
+		"max_retries": 1,
+		"retry_delay_ms": 1
+	})
+	assert_true(result["ok"])
+	assert_equal(result["observability"]["retry_count"], 1)
+	assert_equal(result["observability"]["start_count"], 2)
+	assert_equal(result["observability"]["complete_count"], 2)
+	assert_equal(result["status_code"], 200)
+}
+

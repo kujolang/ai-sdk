@@ -1,0 +1,160 @@
+name: release-validation
+
+on:
+  release:
+    types: [published, prereleased]
+  workflow_dispatch:
+    inputs:
+      allow_live_provider_skip:
+        description: "Allow live-provider smoke to skip when no provider secrets are configured (manual runs only)."
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  release-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      KUJO_RUNTIME_REF: "7819d1475e909ec88f510c9927445791ea928836"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+
+      - name: Build Kujo runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init /tmp/kujo-runtime
+          git -C /tmp/kujo-runtime remote add origin https://github.com/rufflang/ruff.git
+          git -C /tmp/kujo-runtime fetch --depth 1 origin "$KUJO_RUNTIME_REF"
+          git -C /tmp/kujo-runtime checkout --detach "$KUJO_RUNTIME_REF"
+          cargo build --release --locked --manifest-path /tmp/kujo-runtime/Cargo.toml
+          ln -sf /tmp/kujo-runtime/target/release/ruff /tmp/kujo-runtime/target/release/kujo
+          echo "/tmp/kujo-runtime/target/release" >> "$GITHUB_PATH"
+
+      - name: Verify Kujo runtime
+        run: kujo --version
+
+      - name: Run release quality gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/release_quality_gates.sh
+
+  release-live-provider-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: release-contracts
+    env:
+      KUJO_RUNTIME_REF: "7819d1475e909ec88f510c9927445791ea928836"
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+
+      - name: Build Kujo runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init /tmp/kujo-runtime
+          git -C /tmp/kujo-runtime remote add origin https://github.com/rufflang/ruff.git
+          git -C /tmp/kujo-runtime fetch --depth 1 origin "$KUJO_RUNTIME_REF"
+          git -C /tmp/kujo-runtime checkout --detach "$KUJO_RUNTIME_REF"
+          cargo build --release --locked --manifest-path /tmp/kujo-runtime/Cargo.toml
+          ln -sf /tmp/kujo-runtime/target/release/ruff /tmp/kujo-runtime/target/release/kujo
+          echo "/tmp/kujo-runtime/target/release" >> "$GITHUB_PATH"
+
+      - name: Verify Kujo runtime
+        run: kujo --version
+
+      - name: Announce live-provider mode
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${OPENAI_API_KEY:-}" ]; then
+            echo "OpenAI key detected for release live-provider smoke validation."
+          elif [ -n "${DEEPSEEK_API_KEY:-}" ]; then
+            echo "DeepSeek key detected for release live-provider smoke validation."
+          elif [ -n "${OPENROUTER_API_KEY:-}" ]; then
+            echo "OpenRouter key detected for release live-provider smoke validation."
+          else
+            echo "No live-provider keys detected."
+          fi
+
+      - name: Enforce live-provider evidence policy
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          ALLOW_SKIP_INPUT: ${{ github.event.inputs.allow_live_provider_skip || 'false' }}
+        run: |
+          set -euo pipefail
+          if [ -n "${OPENAI_API_KEY:-}" ] || [ -n "${DEEPSEEK_API_KEY:-}" ] || [ -n "${OPENROUTER_API_KEY:-}" ]; then
+            echo "Live-provider evidence requirement satisfied."
+            exit 0
+          fi
+
+          if [ "${EVENT_NAME}" = "workflow_dispatch" ] && [ "${ALLOW_SKIP_INPUT}" = "true" ]; then
+            echo "Manual override enabled (allow_live_provider_skip=true); continuing without provider key."
+            exit 0
+          fi
+
+          echo "At least one provider key is required for release live-provider smoke validation."
+          echo "Set OPENAI_API_KEY, DEEPSEEK_API_KEY, or OPENROUTER_API_KEY as repository secrets."
+          exit 1
+
+      - name: Run live-provider smoke test
+        run: kujo test-run tests/live_provider_smoke_tests.ruff
+
+  supply-chain-security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: release-contracts
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Run supply-chain policy checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/supply_chain_policy_check.sh
+
+      - name: Generate SBOM (SPDX JSON)
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        with:
+          path: .
+          format: spdx-json
+          output-file: artifacts/security/sbom.spdx.json
+
+      - name: Generate integrity manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/generate_integrity_manifest.sh artifacts/security
+
+      - name: Upload security artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: supply-chain-security-artifacts
+          path: artifacts/security
+
+      - name: Attest SBOM provenance
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+        with:
+          subject-path: artifacts/security/sbom.spdx.json

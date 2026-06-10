@@ -1,0 +1,79 @@
+from src.providers import openai_provider
+from src.ai_sdk import create_client, create_message, chat_completion
+
+print("Kujo AI SDK Telemetry Bridge Example")
+print("------------------------------------")
+
+provider := openai_provider()
+client := create_client(provider, "fixture-key")
+messages := [create_message("user", "Return READY")]
+
+emit_otel_like := func(signal_name, fields) {
+	payload := {
+		"signal": signal_name,
+		"library": "ai-sdk",
+		"provider": provider["name"],
+		"fields": fields
+	}
+	print(to_json(payload))
+}
+
+retry_state := {
+	"calls": 0
+}
+
+flaky_transport := func(url, request_options) {
+	retry_state["calls"] := retry_state["calls"] + 1
+	if retry_state["calls"] == 1 {
+		return Err("simulated transient timeout")
+	}
+	return Ok({
+		"_status": 200,
+		"_body": "{\"id\":\"telemetry-ok\",\"model\":\"gpt-4.1-mini\",\"choices\":[{\"message\":{\"content\":\"READY\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}"
+	})
+}
+
+on_request_start := func(event) {
+	emit_otel_like("span.start", {
+		"ai.attempt": event["attempt"],
+		"ai.provider": event["provider"],
+		"http.url": event["url"],
+		"ai.stream": event["stream"],
+		"started_at": event["started_at"]
+	})
+}
+
+on_retry := func(event) {
+	emit_otel_like("span.event.retry", {
+		"ai.retry.attempt": event["attempt"],
+		"ai.retry.next_attempt": event["next_attempt"],
+		"ai.retry.delay_ms": event["delay_ms"],
+		"http.status_code": event["status_code"],
+		"error.code": event["error_code"]
+	})
+}
+
+on_request_complete := func(event) {
+	emit_otel_like("span.end", {
+		"ai.attempt": event["attempt"],
+		"ok": event["ok"],
+		"http.status_code": event["status_code"],
+		"error.code": event["error_code"],
+		"started_at": event["started_at"],
+		"finished_at": event["finished_at"]
+	})
+}
+
+result := chat_completion(client, messages, {
+	"transport": flaky_transport,
+	"on_request_start": on_request_start,
+	"on_retry": on_retry,
+	"on_request_complete": on_request_complete,
+	"max_retries": 2,
+	"retry_budget": 2,
+	"retry_delay_ms": 1
+})
+
+print("")
+print("Final normalized result:")
+print(to_json(result))

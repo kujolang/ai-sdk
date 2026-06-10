@@ -1,0 +1,51 @@
+test_setup {
+	from src.providers import openai_provider
+	from src.ai_sdk import create_client, create_message, chat_completion, chat_completion_stream, embeddings
+}
+
+test "feature smoke chat completion fixture path" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+	messages := [create_message("user", "feature smoke")]
+
+	result := chat_completion(client, messages, {
+		"offline_fixture": true
+	})
+
+	assert_true(result["ok"])
+	assert_true(len(result["output_text"]) > 0)
+	assert_equal(result["provider"], "openai")
+}
+
+test "feature smoke stream callback path" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+	messages := [create_message("user", "stream smoke")]
+
+	on_event := func(event) {
+		return
+	}
+
+	result := chat_completion_stream(client, messages, {
+		"offline_fixture": true
+	}, on_event)
+
+	assert_true(result["ok"])
+	events := result["emitted_events"]
+	assert_true(len(events) > 0)
+	last_event := events[len(events) - 1]
+	assert_equal(last_event["type"], "done")
+}
+
+test "feature smoke embeddings fixture path" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+
+	result := embeddings(client, "feature smoke embeddings", {
+		"offline_fixture": true
+	})
+
+	assert_true(result["ok"])
+	assert_true(type(result["embeddings"]) == "array")
+	assert_true(len(result["embeddings"]) > 0)
+}

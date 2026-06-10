@@ -1,0 +1,208 @@
+test_setup {
+	from src.providers import openai_provider
+	from src.ai_sdk import create_client, create_message, chat_completion, parse_sse_contract
+}
+
+test "timeout transport error is normalized as retryable network_error" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+	messages := [create_message("user", "timeout path")]
+
+	timeout_transport := func(url, request_options) {
+		return Err("timeout while connecting to provider")
+	}
+
+	result := chat_completion(client, messages, {
+		"transport": timeout_transport,
+		"max_retries": 0
+	})
+
+	assert_false(result["ok"])
+	assert_equal(result["error"]["code"], "network_error")
+	assert_true(result["error"]["retryable"])
+	assert_equal(result["observability"]["start_count"], 1)
+	assert_equal(result["observability"]["complete_count"], 1)
+}
+
+test "429 retry pressure eventually succeeds within retry budget" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+	messages := [create_message("user", "retry pressure")]
+	state := {
+		"calls": 0
+	}
+
+	transport_retry_burst := func(url, request_options) {
+		state["calls"] := state["calls"] + 1
+		if state["calls"] <= 2 {
+			return Ok({
+				"_status": 429,
+				"_body": "{\"error\":{\"message\":\"rate limited\"}}"
+			})
+		}
+		return Ok({
+			"_status": 200,
+			"_body": "{\"id\":\"retry-ok\",\"model\":\"gpt-4.1-mini\",\"choices\":[{\"message\":{\"content\":\"ready\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}"
+		})
+	}
+
+	result := chat_completion(client, messages, {
+		"transport": transport_retry_burst,
+		"max_retries": 3,
+		"retry_delay_ms": 1,
+		"max_retry_delay_ms": 2
+	})
+
+	assert_true(result["ok"])
+	assert_equal(result["observability"]["retry_count"], 2)
+	assert_equal(result["observability"]["start_count"], 3)
+	assert_equal(result["observability"]["complete_count"], 3)
+}
+
+test "retry exhaustion returns final 429 failure with deterministic counters" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+	messages := [create_message("user", "retry exhaustion")]
+
+	always_429_transport := func(url, request_options) {
+		return Ok({
+			"_status": 429,
+			"_body": "{\"error\":{\"message\":\"still rate limited\"}}"
+		})
+	}
+
+	result := chat_completion(client, messages, {
+		"transport": always_429_transport,
+		"max_retries": 2,
+		"retry_delay_ms": 1,
+		"max_retry_delay_ms": 2
+	})
+
+	assert_false(result["ok"])
+	assert_equal(result["error"]["code"], "http_error")
+	assert_equal(result["status_code"], 429)
+	assert_equal(result["observability"]["retry_count"], 2)
+	assert_equal(result["observability"]["start_count"], 3)
+	assert_equal(result["observability"]["complete_count"], 3)
+}
+
+test "malformed stream frame produces invalid_json instead of crash" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+	messages := [create_message("user", "malformed stream")]
+
+	malformed_stream_transport := func(url, request_options) {
+		return Ok({
+			"_status": 200,
+			"_body": "data: {bad-json}\n\n"
+		})
+	}
+
+	result := chat_completion(client, messages, {
+		"transport": malformed_stream_transport,
+		"stream": true,
+		"max_retries": 0
+	})
+
+	assert_false(result["ok"])
+	assert_equal(result["error"]["code"], "invalid_json")
+}
+
+test "partial body JSON is rejected deterministically" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+	messages := [create_message("user", "partial json")]
+
+	partial_json_transport := func(url, request_options) {
+		return Ok({
+			"_status": 200,
+			"_body": "{\"id\":\"partial\""
+		})
+	}
+
+	result := chat_completion(client, messages, {
+		"transport": partial_json_transport,
+		"max_retries": 0
+	})
+
+	assert_false(result["ok"])
+	assert_equal(result["error"]["code"], "invalid_json")
+}
+
+test "SSE parser keeps valid events and ignores malformed frames" {
+	body_text := "data: {\"id\":\"evt-1\",\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n" +
+		"data: {bad}\n\n" +
+		"data: {\"id\":\"evt-2\",\"choices\":[{\"delta\":{\"content\":\"b\"}}]}\n\n"
+
+	events := parse_sse_contract(body_text)
+	assert_equal(len(events), 2)
+	assert_equal(events[0]["id"], "evt-1")
+	assert_equal(events[1]["id"], "evt-2")
+}
+
+test "retry storm remains deterministic under long 429 burst" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+	messages := [create_message("user", "retry storm")]
+	state := {
+		"calls": 0
+	}
+
+	storm_transport := func(url, request_options) {
+		state["calls"] := state["calls"] + 1
+		if state["calls"] <= 8 {
+			return Ok({
+				"_status": 429,
+				"_body": "{\"error\":{\"message\":\"storm\"}}"
+			})
+		}
+		return Ok({
+			"_status": 200,
+			"_body": "{\"id\":\"storm-ok\",\"model\":\"gpt-4.1-mini\",\"choices\":[{\"message\":{\"content\":\"stabilized\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}"
+		})
+	}
+
+	result := chat_completion(client, messages, {
+		"transport": storm_transport,
+		"max_retries": 8,
+		"retry_budget": 8,
+		"retry_delay_ms": 1,
+		"max_retry_delay_ms": 2
+	})
+
+	assert_true(result["ok"])
+	assert_equal(result["observability"]["retry_count"], 8)
+	assert_equal(result["observability"]["start_count"], 9)
+	assert_equal(result["observability"]["complete_count"], 9)
+}
+
+test "chunked malformed stream burst keeps valid delta events" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+	messages := [create_message("user", "burst stream")]
+
+	burst_transport := func(url, request_options) {
+		return Ok({
+			"_status": 200,
+			"_body": "",
+			"_stream_chunks": [
+				"data: {bad}\n\n",
+				"data: {\"id\":\"evt-1\",\"choices\":[{\"delta\":{\"content\":\"hello\"},\"finish_reason\":\"\"}]}\n\n",
+				"data: {bad2}\n\n",
+				"data: {\"id\":\"evt-2\",\"choices\":[{\"delta\":{\"content\":\" world\"},\"finish_reason\":\"stop\"}]}\n\n",
+				"data: [DONE]\n\n"
+			]
+		})
+	}
+
+	result := chat_completion(client, messages, {
+		"transport": burst_transport,
+		"stream": true,
+		"max_retries": 0
+	})
+
+	assert_true(result["ok"])
+	assert_true(len(result["output_text"]) > 0)
+	assert_equal(result["finish_reason"], "stop")
+	assert_true(len(result["raw"]["stream_events"]) >= 1)
+}

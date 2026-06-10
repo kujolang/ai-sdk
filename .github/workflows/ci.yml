@@ -1,0 +1,76 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  sdk-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      KUJO_RUNTIME_REF: "7819d1475e909ec88f510c9927445791ea928836"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+
+      - name: Build Kujo runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Pin runtime source for reproducible CI builds.
+          git init /tmp/kujo-runtime
+          git -C /tmp/kujo-runtime remote add origin https://github.com/rufflang/ruff.git
+          git -C /tmp/kujo-runtime fetch --depth 1 origin "$KUJO_RUNTIME_REF"
+          git -C /tmp/kujo-runtime checkout --detach "$KUJO_RUNTIME_REF"
+          cargo build --release --locked --manifest-path /tmp/kujo-runtime/Cargo.toml
+          ln -sf /tmp/kujo-runtime/target/release/ruff /tmp/kujo-runtime/target/release/kujo
+          echo "/tmp/kujo-runtime/target/release" >> "$GITHUB_PATH"
+
+      - name: Verify Kujo runtime
+        run: kujo --version
+
+      - name: Verify docs and command freshness
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f docs/SDK_IMPROVEMENT_CHECKLIST.md
+          test -f docs/PROVIDER_EXTENSION_GUIDE.md
+          grep -q '"$KUJO_BIN" run examples/main.ruff' README.md
+          grep -q '"$KUJO_BIN" run scripts/stress_harness.ruff' README.md
+          grep -q 'export KUJO_BIN="${KUJO_BIN:-kujo}"' README.md
+          grep -q 'export KUJO_BIN="${KUJO_BIN:-kujo}"' docs/PROVIDER_EXTENSION_GUIDE.md
+          if grep -q '/Users/robertdevore/2026/' README.md docs/PROVIDER_EXTENSION_GUIDE.md; then
+            echo "Found machine-specific Kujo runtime paths in docs."
+            exit 1
+          fi
+          grep -q "src/ai_sdk.ruff" README.md
+          grep -q "src/providers.ruff" README.md
+
+      - name: Reject root scratch Kujo files
+        shell: bash
+        run: |
+          set -euo pipefail
+          scratch_files="$(find . -maxdepth 1 -type f -name 'test_*.ruff' -print)"
+          if [ -n "$scratch_files" ]; then
+            echo "Found disallowed root scratch Kujo files:"
+            echo "$scratch_files"
+            exit 1
+          fi
+
+      - name: Run supply-chain policy checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/supply_chain_policy_check.sh
+
+      - name: Run release quality gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Keep push/PR verification aligned with release gates to avoid drift.
+          bash scripts/release_quality_gates.sh

@@ -1,0 +1,159 @@
+# Provider presets for OpenAI-compatible chat APIs.
+
+func bool_from_env_flag(value) {
+	if value == "1" {
+		return true
+	}
+	if value == "true" {
+		return true
+	}
+	if value == "TRUE" {
+		return true
+	}
+	return false
+}
+
+func validate_custom_provider_base_url(base_url, allow_insecure_localhost) {
+	if type(base_url) != "string" {
+		return {
+			"ok": false,
+			"error": "Invalid base_url: expected a string URL."
+		}
+	}
+
+	trimmed_url := trim(base_url)
+	if trimmed_url == "" {
+		return {
+			"ok": false,
+			"error": "Invalid base_url: URL cannot be empty."
+		}
+	}
+
+	if contains(trimmed_url, "@") {
+		return {
+			"ok": false,
+			"error": "Invalid base_url: URL must not include embedded credentials."
+		}
+	}
+
+	if contains(trimmed_url, "?") {
+		return {
+			"ok": false,
+			"error": "Invalid base_url: query parameters are not allowed."
+		}
+	}
+
+	if contains(trimmed_url, "#") {
+		return {
+			"ok": false,
+			"error": "Invalid base_url: URL fragments are not allowed."
+		}
+	}
+
+	if starts_with(trimmed_url, "https://") {
+		return {
+			"ok": true,
+			"error": ""
+		}
+	}
+
+	is_localhost_http := starts_with(trimmed_url, "http://localhost") || starts_with(trimmed_url, "http://127.0.0.1")
+	if is_localhost_http {
+		if allow_insecure_localhost {
+			return {
+				"ok": true,
+				"error": ""
+			}
+		}
+		return {
+			"ok": false,
+			"error": "Invalid base_url: insecure localhost HTTP requires explicit opt-in."
+		}
+	}
+
+	return {
+		"ok": false,
+		"error": "Invalid base_url: only https:// endpoints are allowed by default."
+	}
+}
+
+func custom_openai_compatible_provider_with_options_impl(base_url, api_key_env, default_model, allow_insecure_localhost) {
+	validation := validate_custom_provider_base_url(base_url, allow_insecure_localhost)
+
+	provider := {
+		"name": "openai-compatible",
+		"base_url": base_url,
+		"chat_path": "/chat/completions",
+		"api_key_env": api_key_env,
+		"default_model": default_model,
+		"capabilities": {
+			"streaming": true,
+			"tool_calls": true,
+			"json_mode": true,
+			"embeddings": true
+		}
+	}
+
+	if !validation["ok"] {
+		provider["validation_error"] := validation["error"]
+	} else {
+		provider["validation_error"] := ""
+	}
+
+	return provider
+}
+
+export openai_provider := func() {
+	return {
+		"name": "openai",
+		"base_url": "https://api.openai.com/v1",
+		"chat_path": "/chat/completions",
+		"api_key_env": "OPENAI_API_KEY",
+		"default_model": "gpt-4.1-mini",
+		"capabilities": {
+			"streaming": true,
+			"tool_calls": true,
+			"json_mode": true,
+			"embeddings": true
+		}
+	}
+}
+
+export openrouter_provider := func() {
+	return {
+		"name": "openrouter",
+		"base_url": "https://openrouter.ai/api/v1",
+		"chat_path": "/chat/completions",
+		"api_key_env": "OPENROUTER_API_KEY",
+		"default_model": "openai/gpt-4.1-mini",
+		"capabilities": {
+			"streaming": true,
+			"tool_calls": true,
+			"json_mode": true,
+			"embeddings": true
+		}
+	}
+}
+
+export deepseek_provider := func() {
+	return {
+		"name": "deepseek",
+		"base_url": "https://api.deepseek.com/v1",
+		"chat_path": "/chat/completions",
+		"api_key_env": "DEEPSEEK_API_KEY",
+		"default_model": "deepseek-chat",
+		"capabilities": {
+			"streaming": true,
+			"tool_calls": true,
+			"json_mode": true,
+			"embeddings": true
+		}
+	}
+}
+
+export custom_openai_compatible_provider := func(base_url, api_key_env, default_model) {
+	allow_insecure_localhost := bool_from_env_flag(env("KUJO_AI_SDK_ALLOW_INSECURE_LOCALHOST"))
+	return custom_openai_compatible_provider_with_options_impl(base_url, api_key_env, default_model, allow_insecure_localhost)
+}
+
+export custom_openai_compatible_provider_with_options := custom_openai_compatible_provider_with_options_impl

@@ -1,0 +1,54 @@
+from src.providers import openai_provider
+from src.ai_sdk import create_client, create_message, chat_completion
+
+func print_summary(mode, result) {
+	print("Mode:", mode)
+	print("OK:", result["ok"])
+	print("Provider:", result["provider"])
+	print("Status:", result["status_code"])
+
+	if result["ok"] {
+		print("Model:", result["model"])
+		print("Output:", result["output_text"])
+		print("Finish reason:", result["finish_reason"])
+		print("Usage:", result["usage"])
+	} else {
+		print("Error:", result["error"]["code"], "-", result["error"]["message"])
+	}
+
+	print("")
+	print("Normalized JSON:")
+	print(to_json(result))
+}
+
+print("Kujo AI SDK Example App")
+print("-----------------------")
+
+provider := openai_provider()
+resolved_api_key := env(provider["api_key_env"])
+client := create_client(provider, resolved_api_key)
+
+missing_key := client["api_key"] == ""
+
+messages := [
+	create_message("system", "You are a concise assistant for developers."),
+	create_message("user", "In one sentence, explain why a standardized AI SDK response format is useful.")
+]
+
+if missing_key {
+	print("No OPENAI_API_KEY found. Running fixture mode so this project works offline.")
+	print("")
+	fixture_result := chat_completion(client, messages, {"offline_fixture": true})
+	print_summary("fixture", fixture_result)
+} else {
+	print("OPENAI_API_KEY detected. Running live OpenAI-compatible request.")
+	print("")
+	options := {
+		"temperature": 0.2,
+		"max_tokens": 140,
+		"max_retries": 2,
+		"retry_delay_ms": 250
+	}
+	live_result := chat_completion(client, messages, options)
+	print_summary("live", live_result)
+}

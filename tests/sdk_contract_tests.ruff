@@ -1,0 +1,434 @@
+test_setup {
+	from src.providers import openai_provider, deepseek_provider, custom_openai_compatible_provider, custom_openai_compatible_provider_with_options
+	from src.ai_sdk import create_client, create_message, build_chat_payload, chat_completion, chat_completion_stream, embeddings, provider_supports, standard_error_response, normalize_provider_error, parse_json_contract, parse_sse_contract, should_retry_error_result, retry_delay_contract, merge_headers_for_request, normalize_non_stream_success, normalize_stream_success, resolve_options, sdk_default_limits, sdk_contract_version
+}
+
+test "normalized responses include contract version" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+	messages := [create_message("user", "contract version")]
+
+	success_result := chat_completion(client, messages, {"offline_fixture": true})
+	assert_equal(success_result["contract_version"], sdk_contract_version())
+
+	error_result := chat_completion(create_client(provider, ""), messages, null)
+	assert_equal(error_result["contract_version"], sdk_contract_version())
+
+	embeddings_result := embeddings(client, "contract version", {"offline_fixture": true})
+	assert_equal(embeddings_result["contract_version"], sdk_contract_version())
+}
+
+test "build_chat_payload applies defaults and overrides" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+	messages := [create_message("user", "Hello")]
+
+	defaults := build_chat_payload(client, messages, null)
+	assert_equal(defaults["model"], provider["default_model"])
+	assert_equal(defaults["temperature"], 0.2)
+	assert_equal(defaults["max_tokens"], 400)
+	assert_false(defaults["stream"])
+
+	overrides := build_chat_payload(client, messages, {
+		"model": "gpt-4.1",
+		"temperature": 0.55,
+		"max_tokens": 128,
+		"stream": true,
+		"tools": [
+			{"type": "function", "function": {"name": "hello_tool"}}
+		]
+	})
+	assert_equal(overrides["model"], "gpt-4.1")
+	assert_equal(overrides["temperature"], 0.55)
+	assert_equal(overrides["max_tokens"], 128)
+	assert_true(overrides["stream"])
+	assert_equal(has_key(overrides, "tools"), 1)
+}
+
+test "chat_completion fixture returns normalized success contract" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+	messages := [create_message("user", "Why standardize AI outputs?")]
+
+	result := chat_completion(client, messages, {"offline_fixture": true})
+	assert_true(result["ok"])
+	assert_equal(result["provider"], "openai")
+	assert_true(len(result["output_text"]) > 0)
+	assert_equal(result["usage"]["total_tokens"], 20)
+	assert_true(type(result["tool_calls"]) == "array")
+}
+
+test "chat_completion returns auth error when key is missing" {
+	provider := deepseek_provider()
+	client := create_client(provider, "")
+	messages := [create_message("user", "Hello")]
+
+	result := chat_completion(client, messages, null)
+	assert_false(result["ok"])
+	assert_equal(result["error"]["code"], "auth_error")
+}
+
+test "provider capability checks work" {
+	provider := openai_provider()
+	assert_true(provider_supports(provider, "streaming"))
+	assert_true(provider_supports(provider, "tool_calls"))
+	assert_false(provider_supports(provider, "non_existent_feature"))
+}
+
+test "chat_completion_stream fixture emits delta and done events" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+	messages := [create_message("user", "Stream this")]
+
+	handler := func(event) {}
+
+	result := chat_completion_stream(client, messages, {"offline_fixture": true}, handler)
+	assert_true(result["ok"])
+	events := result["emitted_events"]
+	assert_true(type(events) == "array")
+	assert_true(len(events) > 0)
+
+	has_delta := false
+	i := 0
+	while i < len(events) {
+		if events[i]["type"] == "delta" {
+			has_delta := true
+		}
+		i := i + 1
+	}
+	assert_true(has_delta)
+
+	last_event := events[len(events) - 1]
+	assert_equal(last_event["type"], "done")
+	assert_true(last_event["done"])
+}
+
+test "retry policy retries only network errors, 429, and 5xx" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+
+	http_400 := standard_error_response(client, "http_error", "HTTP 400", 400, null, true)
+	http_401 := standard_error_response(client, "http_error", "HTTP 401", 401, null, true)
+	http_404 := standard_error_response(client, "http_error", "HTTP 404", 404, null, true)
+	http_409 := standard_error_response(client, "http_error", "HTTP 409", 409, null, true)
+	http_429 := standard_error_response(client, "http_error", "HTTP 429", 429, null, true)
+	http_500 := standard_error_response(client, "http_error", "HTTP 500", 500, null, true)
+	network_error := standard_error_response(client, "network_error", "timeout", 0, null, true)
+
+	assert_false(should_retry_error_result(http_400))
+	assert_false(should_retry_error_result(http_401))
+	assert_false(should_retry_error_result(http_404))
+	assert_false(should_retry_error_result(http_409))
+	assert_true(should_retry_error_result(http_429))
+	assert_true(should_retry_error_result(http_500))
+	assert_true(should_retry_error_result(network_error))
+}
+
+test "header policy protects Authorization and Content-Type by default" {
+	default_headers := {
+		"Authorization": "Bearer sdk-key",
+		"Content-Type": "application/json"
+	}
+	extra_headers := {
+		"Authorization": "Bearer attacker",
+		"content-type": "text/plain",
+		"X-Trace": "trace-123"
+	}
+
+	merged := merge_headers_for_request(default_headers, extra_headers, false)
+	assert_equal(merged["Authorization"], "Bearer sdk-key")
+	assert_equal(merged["Content-Type"], "application/json")
+	assert_equal(merged["X-Trace"], "trace-123")
+}
+
+test "header policy allows protected overrides with explicit opt-in" {
+	default_headers := {
+		"Authorization": "Bearer sdk-key",
+		"Content-Type": "application/json"
+	}
+	extra_headers := {
+		"authorization": "Bearer explicit",
+		"Content-Type": "application/custom+json"
+	}
+
+	merged := merge_headers_for_request(default_headers, extra_headers, true)
+	assert_equal(merged["Authorization"], "Bearer explicit")
+	assert_equal(merged["Content-Type"], "application/custom+json")
+}
+
+test "custom provider base_url validation accepts https and opted-in localhost http" {
+	https_provider := custom_openai_compatible_provider("https://example.com/v1", "OPENAI_API_KEY", "gpt-4.1-mini")
+	assert_equal(https_provider["validation_error"], "")
+
+	localhost_provider := custom_openai_compatible_provider_with_options("http://localhost:11434/v1", "OPENAI_API_KEY", "gpt-4.1-mini", true)
+	assert_equal(localhost_provider["validation_error"], "")
+}
+
+test "custom provider base_url validation rejects unsafe http and fails fast" {
+	unsafe_provider := custom_openai_compatible_provider_with_options("http://example.com/v1", "OPENAI_API_KEY", "gpt-4.1-mini", false)
+	assert_true(len(unsafe_provider["validation_error"]) > 0)
+
+	client := create_client(unsafe_provider, "fixture-key")
+	result := chat_completion(client, [create_message("user", "hello")], {"offline_fixture": true})
+	assert_false(result["ok"])
+	assert_equal(result["error"]["code"], "config_error")
+}
+
+test "custom provider base_url validation rejects localhost http without opt-in" {
+	localhost_provider := custom_openai_compatible_provider_with_options("http://localhost:11434/v1", "OPENAI_API_KEY", "gpt-4.1-mini", false)
+	assert_true(len(localhost_provider["validation_error"]) > 0)
+}
+
+test "custom provider base_url validation rejects embedded credentials" {
+	credentialed_provider := custom_openai_compatible_provider_with_options("https://user:pass@example.com/v1", "OPENAI_API_KEY", "gpt-4.1-mini", false)
+	assert_true(len(credentialed_provider["validation_error"]) > 0)
+
+	client := create_client(credentialed_provider, "fixture-key")
+	result := chat_completion(client, [create_message("user", "hello")], {"offline_fixture": true})
+	assert_false(result["ok"])
+	assert_equal(result["error"]["code"], "config_error")
+}
+
+test "custom provider base_url validation rejects query and fragment URL forms" {
+	query_provider := custom_openai_compatible_provider_with_options("https://example.com/v1?token=abc", "OPENAI_API_KEY", "gpt-4.1-mini", false)
+	fragment_provider := custom_openai_compatible_provider_with_options("https://example.com/v1#section", "OPENAI_API_KEY", "gpt-4.1-mini", false)
+
+	assert_equal(query_provider["validation_error"], "Invalid base_url: query parameters are not allowed.")
+	assert_equal(fragment_provider["validation_error"], "Invalid base_url: URL fragments are not allowed.")
+}
+
+test "endpoint allowlist policy allows approved host" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+	messages := [create_message("user", "hello")]
+
+	transport_ok := func(url, request_options) {
+		return Ok({
+			"_status": 200,
+			"_body": "{\"id\":\"chatcmpl-allowlisted\",\"model\":\"gpt-4.1-mini\",\"choices\":[{\"index\":0,\"finish_reason\":\"stop\",\"message\":{\"role\":\"assistant\",\"content\":\"allowlisted\"}}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5}}"
+		})
+	}
+
+	result := chat_completion(client, messages, {
+		"transport": transport_ok,
+		"endpoint_allowlist_enabled": true,
+		"endpoint_allowlist_hosts": ["api.openai.com"],
+		"max_retries": 0
+	})
+
+	assert_true(result["ok"])
+	assert_equal(result["status_code"], 200)
+}
+
+test "endpoint allowlist policy blocks non-approved hosts" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+	messages := [create_message("user", "hello")]
+
+	transport_should_not_matter := func(url, request_options) {
+		return Ok({
+			"_status": 200,
+			"_body": "{\"id\":\"chatcmpl-blocked\",\"model\":\"gpt-4.1-mini\",\"choices\":[{\"index\":0,\"finish_reason\":\"stop\",\"message\":{\"role\":\"assistant\",\"content\":\"should not pass\"}}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5}}"
+		})
+	}
+
+	chat_result := chat_completion(client, messages, {
+		"transport": transport_should_not_matter,
+		"endpoint_allowlist_enabled": true,
+		"endpoint_allowlist_hosts": ["api.deepseek.com"],
+		"max_retries": 0
+	})
+	assert_false(chat_result["ok"])
+	assert_equal(chat_result["error"]["code"], "endpoint_policy_violation")
+	assert_equal(chat_result["status_code"], 403)
+
+	embeddings_result := embeddings(client, "allowlist check", {
+		"transport": transport_should_not_matter,
+		"endpoint_allowlist_enabled": true,
+		"endpoint_allowlist_hosts": ["api.deepseek.com"],
+		"max_retries": 0
+	})
+	assert_false(embeddings_result["ok"])
+	assert_equal(embeddings_result["error"]["code"], "endpoint_policy_violation")
+	assert_equal(embeddings_result["status_code"], 403)
+}
+
+test "non-stream normalization supports string and text fallback variants" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+
+	string_content := {
+		"id": "resp-1",
+		"model": "gpt-4.1-mini",
+		"choices": [
+			{
+				"message": {
+					"content": "Hello from message content"
+				},
+				"finish_reason": "stop"
+			}
+		],
+		"usage": {
+			"prompt_tokens": 2,
+			"completion_tokens": 4,
+			"total_tokens": 6
+		}
+	}
+	string_result := normalize_non_stream_success(client, 200, string_content, "fallback-model")
+	assert_equal(string_result["output_text"], "Hello from message content")
+
+	text_fallback := {
+		"id": "resp-2",
+		"model": "gpt-4.1-mini",
+		"choices": [
+			{
+				"text": "Fallback text response",
+				"finish_reason": "stop"
+			}
+		]
+	}
+	text_result := normalize_non_stream_success(client, 200, text_fallback, "fallback-model")
+	assert_equal(text_result["output_text"], "Fallback text response")
+}
+
+test "non-stream normalization supports structured message content arrays" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+
+	structured_content := {
+		"id": "resp-3",
+		"choices": [
+			{
+				"message": {
+					"content": [
+						{"type": "text", "text": "Structured "},
+						{"text": {"value": "content"}},
+						{"content": " variant"}
+					]
+				},
+				"finish_reason": "stop"
+			}
+		]
+	}
+	result := normalize_non_stream_success(client, 200, structured_content, "fallback-model")
+	assert_equal(result["output_text"], "Structured content variant")
+}
+
+test "usage normalization supports prompt/completion and input/output variants" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+
+	prompt_completion_usage := {
+		"choices": [{"message": {"content": "ok"}}],
+		"usage": {
+			"prompt_tokens": 11,
+			"completion_tokens": 7,
+			"total_tokens": 18
+		}
+	}
+	result_legacy := normalize_non_stream_success(client, 200, prompt_completion_usage, "fallback-model")
+	assert_equal(result_legacy["usage"]["input_tokens"], 11)
+	assert_equal(result_legacy["usage"]["output_tokens"], 7)
+	assert_equal(result_legacy["usage"]["total_tokens"], 18)
+
+	input_output_usage := {
+		"choices": [{"message": {"content": "ok"}}],
+		"usage": {
+			"input_tokens": 4,
+			"output_tokens": 6
+		}
+	}
+	result_modern := normalize_non_stream_success(client, 200, input_output_usage, "fallback-model")
+	assert_equal(result_modern["usage"]["input_tokens"], 4)
+	assert_equal(result_modern["usage"]["output_tokens"], 6)
+	assert_equal(result_modern["usage"]["total_tokens"], 10)
+
+	mixed_usage := {
+		"choices": [{"message": {"content": "ok"}}],
+		"usage": {
+			"prompt_tokens": 3,
+			"output_tokens": 5
+		}
+	}
+	result_mixed := normalize_non_stream_success(client, 200, mixed_usage, "fallback-model")
+	assert_equal(result_mixed["usage"]["input_tokens"], 3)
+	assert_equal(result_mixed["usage"]["output_tokens"], 5)
+	assert_equal(result_mixed["usage"]["total_tokens"], 8)
+}
+
+test "provider error normalization preserves structured metadata" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+
+	raw_error := {
+		"error": {
+			"message": "Invalid parameter",
+			"type": "invalid_request_error",
+			"param": "messages[0].content",
+			"code": "invalid_param"
+		}
+	}
+
+	result := normalize_provider_error(client, 400, raw_error)
+	assert_false(result["ok"])
+	assert_equal(result["error"]["code"], "provider_error")
+	assert_equal(result["error"]["message"], "Invalid parameter")
+	assert_equal(result["error"]["type"], "invalid_request_error")
+	assert_equal(result["error"]["param"], "messages[0].content")
+	assert_equal(result["error"]["provider_code"], "invalid_param")
+}
+
+test "provider error normalization keeps base keys when metadata missing" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+
+	raw_error := {
+		"error": {
+			"message": "Provider returned an error"
+		}
+	}
+	result := normalize_provider_error(client, 400, raw_error)
+	assert_false(result["ok"])
+	assert_equal(result["error"]["code"], "provider_error")
+	assert_equal(result["error"]["message"], "Provider returned an error")
+	assert_equal(has_key(result["error"], "type"), 0)
+	assert_equal(has_key(result["error"], "param"), 0)
+	assert_equal(has_key(result["error"], "provider_code"), 0)
+}
+
+test "streaming returns normalized error when callback throws on delta" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+	messages := [create_message("user", "Stream this")]
+
+	handler := func(event) {
+		if event["type"] == "delta" {
+			parse_json("{")
+		}
+	}
+
+	result := chat_completion_stream(client, messages, {"offline_fixture": true}, handler)
+	assert_false(result["ok"])
+	assert_equal(result["error"]["code"], "stream_callback_error")
+	assert_true(type(result["emitted_events"]) == "array")
+	assert_true(len(result["emitted_events"]) > 0)
+}
+
+test "streaming returns normalized error when callback throws on error event" {
+	provider := deepseek_provider()
+	client := create_client(provider, "")
+	messages := [create_message("user", "Stream this")]
+
+	handler := func(event) {
+		if event["type"] == "error" {
+			parse_json("{")
+		}
+	}
+
+	result := chat_completion_stream(client, messages, null, handler)
+	assert_false(result["ok"])
+	assert_equal(result["error"]["code"], "stream_callback_error")
+	assert_true(type(result["emitted_events"]) == "array")
+	assert_true(len(result["emitted_events"]) > 0)
+}
+

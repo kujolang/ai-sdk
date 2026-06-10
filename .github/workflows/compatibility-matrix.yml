@@ -1,0 +1,48 @@
+name: compatibility-matrix
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  runtime-compatibility:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime_ref:
+          - "00d0bb9208af55d2c112635bc97d16a4c2c6497f"
+          - "595ab87bb130cd278a6904c7c8204582d0410b8e"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+
+      - name: Build Kujo runtime (${{ matrix.runtime_ref }})
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init /tmp/kujo-runtime
+          git -C /tmp/kujo-runtime remote add origin https://github.com/rufflang/ruff.git
+          git -C /tmp/kujo-runtime fetch --depth 1 origin "${{ matrix.runtime_ref }}"
+          git -C /tmp/kujo-runtime checkout --detach "${{ matrix.runtime_ref }}"
+          cargo build --release --locked --manifest-path /tmp/kujo-runtime/Cargo.toml
+          ln -sf /tmp/kujo-runtime/target/release/ruff /tmp/kujo-runtime/target/release/kujo
+          echo "/tmp/kujo-runtime/target/release" >> "$GITHUB_PATH"
+
+      - name: Verify Kujo runtime
+        run: kujo --version
+
+      - name: Run contract suite
+        run: kujo test-run tests/sdk_contract_tests.ruff
+
+      - name: Run reliability suite
+        run: kujo test-run tests/reliability_failure_modes_tests.ruff
+
+      - name: Run feature smoke suite
+        run: kujo test-run tests/feature_smoke_tests.ruff

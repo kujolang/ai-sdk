@@ -1,0 +1,109 @@
+from src.providers import openai_provider
+from src.ai_sdk import create_client, create_message, chat_completion, embeddings, retry_delay_contract
+
+func fail_benchmark_gate(message) {
+	print("Benchmark gate failure: " + message)
+	parse_json("{")
+}
+
+func benchmark_operation_result(case_name, client, messages) {
+	if case_name == "chat_normalization_path" {
+		return chat_completion(client, messages, {
+			"offline_fixture": true,
+			"max_retries": 0
+		})
+	}
+
+	if case_name == "embeddings_normalization_path" {
+		return embeddings(client, "benchmark embedding payload", {
+			"offline_fixture": true,
+			"max_retries": 0
+		})
+	}
+
+	if case_name == "chat_retry_path" {
+		total_delay_ms := 0
+		attempt := 0
+		while attempt < 3 {
+			total_delay_ms := total_delay_ms + retry_delay_contract(attempt, 250, 2000, 40)
+			attempt := attempt + 1
+		}
+
+		return {
+			"ok": total_delay_ms >= 0,
+			"total_delay_ms": total_delay_ms
+		}
+	}
+
+	if case_name == "embeddings_retry_path" {
+		total_delay_ms := 0
+		attempt := 0
+		while attempt < 3 {
+			total_delay_ms := total_delay_ms + retry_delay_contract(attempt, 150, 1200, 25)
+			attempt := attempt + 1
+		}
+
+		return {
+			"ok": total_delay_ms >= 0,
+			"total_delay_ms": total_delay_ms
+		}
+	}
+
+	fail_benchmark_gate("Unknown benchmark case: " + case_name)
+	return {
+		"ok": false,
+		"error": {
+			"code": "unknown_benchmark_case"
+		}
+	}
+}
+
+func run_benchmark_case(case_name, iterations, max_avg_latency_ms, min_throughput_rps, client, messages) {
+	print("")
+	print("Case: " + case_name)
+	start_ms := current_timestamp()
+
+	i := 0
+	while i < iterations {
+		result := benchmark_operation_result(case_name, client, messages)
+		if !result["ok"] {
+			fail_benchmark_gate(case_name + " returned an invalid result at iteration " + to_string(i))
+		}
+		i := i + 1
+	}
+
+	elapsed_ms := current_timestamp() - start_ms
+	if elapsed_ms <= 0 {
+		elapsed_ms := 1
+	}
+
+	avg_latency_ms := (elapsed_ms * 1.0) / iterations
+	throughput_rps := (iterations * 1000.0) / elapsed_ms
+
+	print("Iterations: " + to_string(iterations))
+	print("Elapsed ms: " + to_string(elapsed_ms))
+	print("Average latency ms: " + to_string(avg_latency_ms) + " (threshold <= " + to_string(max_avg_latency_ms) + ")")
+	print("Throughput rps: " + to_string(throughput_rps) + " (threshold >= " + to_string(min_throughput_rps) + ")")
+
+	if avg_latency_ms > max_avg_latency_ms {
+		fail_benchmark_gate(case_name + " average latency " + to_string(avg_latency_ms) + " exceeded threshold " + to_string(max_avg_latency_ms))
+	}
+
+	if throughput_rps < min_throughput_rps {
+		fail_benchmark_gate(case_name + " throughput " + to_string(throughput_rps) + " below threshold " + to_string(min_throughput_rps))
+	}
+}
+
+print("Kujo AI SDK Benchmark Quality Gate")
+print("----------------------------------")
+
+provider := openai_provider()
+client := create_client(provider, "fixture-key")
+messages := [create_message("user", "benchmark")]
+
+run_benchmark_case("chat_normalization_path", 300, 25.0, 35.0, client, messages)
+run_benchmark_case("embeddings_normalization_path", 300, 25.0, 30.0, client, messages)
+run_benchmark_case("chat_retry_path", 200, 50.0, 20.0, client, messages)
+run_benchmark_case("embeddings_retry_path", 200, 50.0, 20.0, client, messages)
+
+print("Benchmark quality gate passed.")

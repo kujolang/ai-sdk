@@ -1,0 +1,54 @@
+[package]
+name = "ai-sdk"
+version = "0.1.0"
+description = "Provider-agnostic SDK primitives for building OpenAI-compatible chat integrations in Kujo."
+license = "MIT"
+authors = ["Robert DeVore <me@robertdevore.com>"]
+homepage = ""
+repository = "https://github.com/kujolang/ai-sdk"
+documentation = ""
+keywords = ["kujo", "ai", "sdk", "openai-compatible"]
+categories = ["ai", "developer-tools"]
+readme = "README.md"
+
+[package.status]
+stage = "experimental"
+stability = "early"
+public_api = true
+notes = "API contracts are designed to be stable, but this package remains pre-1.0."
+
+[ruff]
+minimum_version = "0.1.0"
+entry = "examples/main.ruff"
+sources = ["src", "."]
+includes = ["README.md", "tests"]
+excludes = [".git", "kennel_packages", "dist", "build", "node_modules"]
+
+[build]
+command = ""
+output = "dist"
+artifacts = []
+
+[dependencies]
+
+[dev-dependencies]
+
+[scripts]
+test = "kujo test-run tests/sdk_contract_tests.ruff"
+stress = "kujo run scripts/stress_harness.ruff --interpreter"
+
+[package.exports]
+core = "src/ai_sdk.ruff"
+providers = "src/providers.ruff"
+
+[package.metadata]
+contract_tests = "tests/sdk_contract_tests.ruff"
+
+[registry]
+index = ""
+publish = ""
+
+[trust]
+checksum = ""
+signature = ""
+signing_key = ""
