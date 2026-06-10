@@ -2,6 +2,6 @@
 .idea/
 .vscode/
 *.log
-/test_*.ruff
+/test_*.kujo
 /artifacts/
-/ai_sdk.ruff
+/ai_sdk.kujo

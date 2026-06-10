@@ -11,7 +11,7 @@ This project gives you a single, normalized response contract across configured 
 - Reduce API-specific glue code in every service.
 - Support local and CI development without secrets via fixture mode.
 
-This repository is library-first: import `src/ai_sdk.ruff` and `src/providers.ruff` into Kujo workflows, or use the bundled example app for a runnable entrypoint. It does not expose a separate user-facing CLI.
+This repository is library-first: import `src/ai_sdk.kujo` and `src/providers.kujo` into Kujo workflows, or use the bundled example app for a runnable entrypoint. It does not expose a separate user-facing CLI.
 
 ## Highlights
 
@@ -33,17 +33,17 @@ This repository is library-first: import `src/ai_sdk.ruff` and `src/providers.ru
 Use a single runtime selector for all commands in this README:
 
 ```bash
-export KUJO_BIN="${KUJO_BIN:-kujo}"
-"$KUJO_BIN" test-run --help >/dev/null
+export KUJO_BIN="${KUJO_BIN:-/path/to/kujo/target/debug/kujo}"
+./kujo test-run --help >/dev/null
 ```
 
-If the `test-run` help command fails, your PATH likely resolves to the Python linter instead of the Kujo runtime; set `KUJO_BIN` to your runtime binary path.
+If the `test-run` help command fails, set `KUJO_BIN` to your Kujo runtime binary path and rerun through `./kujo`.
 
 ## Quick Start
 
 ```bash
 cd ai-sdk
-"$KUJO_BIN" run examples/main.ruff
+./kujo run examples/main.kujo
 ```
 
 If `OPENAI_API_KEY` is missing, the example automatically falls back to fixture mode.
@@ -54,14 +54,14 @@ OpenAI:
 
 ```bash
 export OPENAI_API_KEY="your_api_key"
-"$KUJO_BIN" run examples/main.ruff
+./kujo run examples/main.kujo
 ```
 
 DeepSeek:
 
 ```bash
 export DEEPSEEK_API_KEY="your_api_key"
-"$KUJO_BIN" run examples/main.ruff
+./kujo run examples/main.kujo
 ```
 
 The provider preset defines which environment variable is read for credentials.
@@ -70,7 +70,7 @@ The provider preset defines which environment variable is read for credentials.
 
 Use this as a provider-gated operational baseline for both chat and embeddings:
 
-```ruff
+```kujo
 from src.providers import openai_provider
 from src.ai_sdk import create_client, create_message, chat_completion, embeddings
 
@@ -132,7 +132,7 @@ Profile notes:
 
 ## API Surface
 
-From [src/ai_sdk.ruff](src/ai_sdk.ruff):
+From [src/ai_sdk.kujo](src/ai_sdk.kujo):
 
 - `create_client(provider, api_key_override)`
 - `create_message(role, content)`
@@ -144,7 +144,7 @@ From [src/ai_sdk.ruff](src/ai_sdk.ruff):
 - `chat_completion_stream(client, messages, options, on_event)`
 - `embeddings(client, input, options)`
 
-From [src/providers.ruff](src/providers.ruff):
+From [src/providers.kujo](src/providers.kujo):
 
 - `openai_provider()`
 - `openrouter_provider()`
@@ -154,7 +154,7 @@ From [src/providers.ruff](src/providers.ruff):
 
 ## Minimal Usage
 
-```ruff
+```kujo
 from src.providers import openai_provider
 from src.ai_sdk import create_client, create_message, chat_completion
 
@@ -180,7 +180,7 @@ if result["ok"] {
 
 ## Streaming Usage
 
-```ruff
+```kujo
 from src.providers import openai_provider
 from src.ai_sdk import create_client, create_message, chat_completion_stream
 
@@ -365,13 +365,13 @@ Local-dev opt-in options:
 
 ## Project Structure
 
-- [src/ai_sdk.ruff](src/ai_sdk.ruff): Core SDK behavior (normalization, retries, streaming, fixture mode)
-- [src/providers.ruff](src/providers.ruff): Provider presets/capabilities
-- [examples/main.ruff](examples/main.ruff): Runnable example
-- [examples/telemetry_bridge.ruff](examples/telemetry_bridge.ruff): Telemetry hook bridge example
-- [examples/production_profile.ruff](examples/production_profile.ruff): Operational defaults example
-- [scripts/stress_harness.ruff](scripts/stress_harness.ruff): High-iteration fixture stability runner
-- [tests/sdk_contract_tests.ruff](tests/sdk_contract_tests.ruff): Contract tests
+- [src/ai_sdk.kujo](src/ai_sdk.kujo): Core SDK behavior (normalization, retries, streaming, fixture mode)
+- [src/providers.kujo](src/providers.kujo): Provider presets/capabilities
+- [examples/main.kujo](examples/main.kujo): Runnable example
+- [examples/telemetry_bridge.kujo](examples/telemetry_bridge.kujo): Telemetry hook bridge example
+- [examples/production_profile.kujo](examples/production_profile.kujo): Operational defaults example
+- [scripts/stress_harness.kujo](scripts/stress_harness.kujo): High-iteration fixture stability runner
+- [tests/sdk_contract_tests.kujo](tests/sdk_contract_tests.kujo): Contract tests
 - [schemas/contracts/1.0.0](schemas/contracts/1.0.0): Machine-readable response contract schemas for `contract_version` `1.0.0`
 - [docs/PROVIDER_EXTENSION_GUIDE.md](docs/PROVIDER_EXTENSION_GUIDE.md): How to add provider presets and validate capabilities
 - [docs/API_CONTRACT_POLICY.md](docs/API_CONTRACT_POLICY.md): Contract versioning and deprecation policy
@@ -394,61 +394,61 @@ Local-dev opt-in options:
 Core contract suite:
 
 ```bash
-"$KUJO_BIN" test-run tests/sdk_contract_tests.ruff
+"$KUJO_BIN" test-run tests/sdk_contract_tests.kujo
 ```
 
 Contract resilience suite:
 
 ```bash
-"$KUJO_BIN" test-run tests/sdk_contract_resilience_tests.ruff
+"$KUJO_BIN" test-run tests/sdk_contract_resilience_tests.kujo
 ```
 
 Contract embeddings suite:
 
 ```bash
-"$KUJO_BIN" test-run tests/sdk_contract_embeddings_tests.ruff
+"$KUJO_BIN" test-run tests/sdk_contract_embeddings_tests.kujo
 ```
 
 Security redaction suite:
 
 ```bash
-"$KUJO_BIN" test-run tests/security_redaction_tests.ruff
+"$KUJO_BIN" test-run tests/security_redaction_tests.kujo
 ```
 
 Reliability failure-mode suite:
 
 ```bash
-"$KUJO_BIN" test-run tests/reliability_failure_modes_tests.ruff
+"$KUJO_BIN" test-run tests/reliability_failure_modes_tests.kujo
 ```
 
 Parser fuzz/smoke suite:
 
 ```bash
-"$KUJO_BIN" test-run tests/parser_fuzz_smoke_tests.ruff
+"$KUJO_BIN" test-run tests/parser_fuzz_smoke_tests.kujo
 ```
 
 Feature smoke suite:
 
 ```bash
-"$KUJO_BIN" test-run tests/feature_smoke_tests.ruff
+"$KUJO_BIN" test-run tests/feature_smoke_tests.kujo
 ```
 
 Telemetry bridge example:
 
 ```bash
-"$KUJO_BIN" run examples/telemetry_bridge.ruff --interpreter
+./kujo run examples/telemetry_bridge.kujo --interpreter
 ```
 
 Production profile example:
 
 ```bash
-"$KUJO_BIN" run examples/production_profile.ruff
+./kujo run examples/production_profile.kujo
 ```
 
 Live-provider smoke test (used by release validation workflow):
 
 ```bash
-"$KUJO_BIN" test-run tests/live_provider_smoke_tests.ruff
+./kujo test-run tests/live_provider_smoke_tests.kujo
 ```
 
 If no provider key is configured (`OPENAI_API_KEY`, `DEEPSEEK_API_KEY`, `OPENROUTER_API_KEY`), the live smoke test exits as a documented skip path.
@@ -464,7 +464,7 @@ bash scripts/release_quality_gates.sh
 ```
 
 The script enforces minimum test-floor thresholds across contract/security/reliability/parser/feature/live suites and runs a final feature smoke command.
-The script also runs the benchmark quality gate (`scripts/benchmark_quality_gate.ruff`).
+The script also runs the benchmark quality gate (`scripts/benchmark_quality_gate.kujo`).
 Benchmark guardrails cover chat and embeddings normalization paths plus retry-delay micro-bench cases with explicit latency and throughput thresholds.
 The gate fails if runtime smoke or benchmark commands emit type-checking warnings.
 
@@ -501,7 +501,7 @@ For each release candidate:
 ## Stress Harness
 
 ```bash
-"$KUJO_BIN" run scripts/stress_harness.ruff
+./kujo run scripts/stress_harness.kujo
 ```
 
 ## GitHub Readiness Checklist

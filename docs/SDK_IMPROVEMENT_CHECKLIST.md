@@ -13,11 +13,11 @@ Use it to:
 
 Reviewed files:
 - README.md
-- ai_sdk.ruff
-- providers.ruff
-- main.ruff
-- stress_harness.ruff
-- tests/sdk_contract_tests.ruff
+- ai_sdk.kujo
+- providers.kujo
+- main.kujo
+- stress_harness.kujo
+- tests/sdk_contract_tests.kujo
 - kujo.toml
 - kennel.toml
 - .github/workflows/ci.yml
@@ -213,11 +213,11 @@ Complexity: M
 Dependencies: None
 Scope:
 - Proposed layout:
-- src/ai_sdk.ruff
-- src/providers.ruff
-- examples/main.ruff
-- scripts/stress_harness.ruff
-- tests/sdk_contract_tests.ruff
+- src/ai_sdk.kujo
+- src/providers.kujo
+- examples/main.kujo
+- scripts/stress_harness.kujo
+- tests/sdk_contract_tests.kujo
 - docs/*
 - Update imports, scripts, and config paths accordingly.
 Acceptance:
@@ -337,12 +337,12 @@ Priority: P0
 Complexity: S
 Dependencies: None
 Scope:
-- Remove non-project scratch `.ruff` files from repository root.
+- Remove non-project scratch `.kujo` files from repository root.
 - Add guardrails to prevent accidental check-in of ad hoc scratch files.
 Acceptance:
 - Root no longer contains untracked scratch artifacts.
 - Ignore policy and/or CI hygiene checks prevent recurrence.
-Completion note (2026-05-21): Removed root scratch Kujo files, added root scratch ignore pattern, and added CI guard that fails if disallowed root `test_*.ruff` files are present.
+Completion note (2026-05-21): Removed root scratch Kujo files, added root scratch ignore pattern, and added CI guard that fails if disallowed root `test_*.kujo` files are present.
 
 - [x] G-02 Add live provider validation in CI release flows
 Status: Done
@@ -541,7 +541,7 @@ Scope:
 - Add benchmark script and CI gate with regression thresholds.
 Acceptance:
 - CI fails if benchmark thresholds regress past budget.
-Completion note (2026-05-21): Added `scripts/benchmark_quality_gate.ruff` and wired benchmark enforcement into CI and release quality-gate scripts.
+Completion note (2026-05-21): Added `scripts/benchmark_quality_gate.kujo` and wired benchmark enforcement into CI and release quality-gate scripts.
 
 - [x] I-07 Add queue-based admission control
 Status: Completed
@@ -641,8 +641,8 @@ Template:
 - Date: 2026-05-21
 - Task ID: A-01
 - Summary of change: Retry logic now retries only network errors, HTTP 429, and HTTP 5xx. Non-retryable 4xx responses now return immediately.
-- Tests added/updated: Added retry policy classification test coverage in tests/sdk_contract_tests.ruff for 400, 401, 404, 409, 429, 500, and network_error.
-- Commands run: kujo test-run tests/sdk_contract_tests.ruff (failed: unrecognized subcommand under the Python linter); /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.ruff (pass); /path/to/kujo/target/debug/kujo run main.ruff --interpreter (pass); /path/to/kujo/target/debug/kujo run stress_harness.ruff --interpreter (pass).
+- Tests added/updated: Added retry policy classification test coverage in tests/sdk_contract_tests.kujo for 400, 401, 404, 409, 429, 500, and network_error.
+- Commands run: kujo test-run tests/sdk_contract_tests.kujo (failed: unrecognized subcommand under the Python linter); /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.kujo (pass); /path/to/kujo/target/debug/kujo run main.kujo --interpreter (pass); /path/to/kujo/target/debug/kujo run stress_harness.kujo --interpreter (pass).
 - README updated: Yes
 - Follow-up notes: Local PATH points to the Python linter by default; use runtime binary path for SDK validation in this environment.
 
@@ -650,7 +650,7 @@ Template:
 - Task ID: A-02
 - Summary of change: Added controlled header merge behavior that protects Authorization and Content-Type by default and permits protected overrides only with explicit opt-in.
 - Tests added/updated: Added merge policy tests for default deny and opt-in allow behavior.
-- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.ruff (pass); /path/to/kujo/target/debug/kujo run main.ruff --interpreter (pass).
+- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.kujo (pass); /path/to/kujo/target/debug/kujo run main.kujo --interpreter (pass).
 - README updated: Yes
 - Follow-up notes: Protected header policy now explicit in request options behavior.
 
@@ -658,7 +658,7 @@ Template:
 - Task ID: A-03
 - Summary of change: Added provider endpoint validation with https default, insecure localhost opt-in, and immediate config_error responses for invalid endpoints.
 - Tests added/updated: Added accepted/rejected URL tests plus fail-fast request-path test for invalid custom provider configuration.
-- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.ruff (pass); /path/to/kujo/target/debug/kujo run main.ruff --interpreter (pass).
+- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.kujo (pass); /path/to/kujo/target/debug/kujo run main.kujo --interpreter (pass).
 - README updated: Yes
 - Follow-up notes: Added environment flag and explicit function opt-in path for localhost HTTP development endpoints.
 
@@ -666,7 +666,7 @@ Template:
 - Task ID: A-04
 - Summary of change: CI runtime build now uses a pinned Kujo commit hash via workflow env (KUJO_RUNTIME_REF) with explicit fetch/checkout to improve reproducibility.
 - Tests added/updated: No direct code tests; validated existing contract and smoke commands after workflow/doc changes.
-- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.ruff (pass); /path/to/kujo/target/debug/kujo run main.ruff --interpreter (pass).
+- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.kujo (pass); /path/to/kujo/target/debug/kujo run main.kujo --interpreter (pass).
 - README updated: Yes
 - Follow-up notes: Update KUJO_RUNTIME_REF intentionally when upgrading runtime behavior in CI.
 
@@ -674,7 +674,7 @@ Template:
 - Task ID: B-01
 - Summary of change: Added broader non-stream output extraction helpers and fallback paths for common provider content variants.
 - Tests added/updated: Added normalization contract tests for string content, structured content arrays, and choice-level text fallback variants.
-- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.ruff (pass); /path/to/kujo/target/debug/kujo run main.ruff --interpreter (pass).
+- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.kujo (pass); /path/to/kujo/target/debug/kujo run main.kujo --interpreter (pass).
 - README updated: Yes
 - Follow-up notes: Added test-export for normalization helper to keep parsing behavior deterministic and regression-testable.
 
@@ -682,7 +682,7 @@ Template:
 - Task ID: B-02
 - Summary of change: Usage token normalization now supports prompt/completion and input/output payload variants and computes total when absent.
 - Tests added/updated: Added usage normalization tests for legacy fields, modern fields, and mixed fallback combinations.
-- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.ruff (pass); /path/to/kujo/target/debug/kujo run main.ruff --interpreter (pass).
+- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.kujo (pass); /path/to/kujo/target/debug/kujo run main.kujo --interpreter (pass).
 - README updated: Yes
 - Follow-up notes: Usage mapping now consistently shared by stream and non-stream normalization paths.
 
@@ -690,7 +690,7 @@ Template:
 - Task ID: B-03
 - Summary of change: Provider error normalization now retains optional structured metadata and exposes it in normalized error payloads.
 - Tests added/updated: Added tests for metadata-preserving provider errors and metadata-missing provider errors.
-- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.ruff (pass after nested dict assignment fix); /path/to/kujo/target/debug/kujo run main.ruff --interpreter (pass).
+- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.kujo (pass after nested dict assignment fix); /path/to/kujo/target/debug/kujo run main.kujo --interpreter (pass).
 - README updated: Yes
 - Follow-up notes: Used runtime-compatible dict mutation strategy (mutate nested error dict, then reassign) to avoid complex index assignment limitations.
 
@@ -698,7 +698,7 @@ Template:
 - Task ID: B-04
 - Summary of change: Streaming callback execution is now wrapped defensively and callback exceptions produce deterministic normalized error responses.
 - Tests added/updated: Added callback exception tests for both successful stream delta events and error-event stream paths.
-- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.ruff (pass); /path/to/kujo/target/debug/kujo run main.ruff --interpreter (pass).
+- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.kujo (pass); /path/to/kujo/target/debug/kujo run main.kujo --interpreter (pass).
 - README updated: Yes
 - Follow-up notes: Stream callback failures now preserve emitted_events context to aid debugging and downstream handling.
 
@@ -706,7 +706,7 @@ Template:
 - Task ID: C-01
 - Summary of change: Introduced centralized option-resolution defaults and removed repeated option parsing in key request/build/retry flows.
 - Tests added/updated: Added resolve_options regression tests for default values and explicit overrides.
-- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.ruff (pass).
+- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.kujo (pass).
 - README updated: No
 - Follow-up notes: Refactor is backward-compatible and intended to simplify future option-related changes.
 
@@ -714,7 +714,7 @@ Template:
 - Task ID: C-02
 - Summary of change: Consolidated parsing logic for choice message fields and stream delta fields into focused helper functions reused by stream and non-stream paths.
 - Tests added/updated: Added stream parser regression test for structured delta content variants and preserved full contract suite coverage.
-- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.ruff (pass).
+- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.kujo (pass).
 - README updated: No
 - Follow-up notes: Shared extraction helpers reduce drift risk between stream and non-stream parsing behavior.
 
@@ -722,7 +722,7 @@ Template:
 - Task ID: C-03
 - Summary of change: Replaced magic default values with centralized limits helper used by option resolution.
 - Tests added/updated: Added regression test to ensure centralized defaults remain stable and aligned with resolved options.
-- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.ruff (pass).
+- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.kujo (pass).
 - README updated: Yes
 - Follow-up notes: Default values now have a single source of truth through sdk_default_limits().
 
@@ -730,7 +730,7 @@ Template:
 - Task ID: D-01
 - Summary of change: Reorganized repository layout to src/examples/scripts and updated import/module paths and command references.
 - Tests added/updated: No new tests; updated test and runtime imports to new src-prefixed module paths.
-- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.ruff (pass); /path/to/kujo/target/debug/kujo run examples/main.ruff --interpreter (pass); /path/to/kujo/target/debug/kujo run scripts/stress_harness.ruff --interpreter (pass); README stale-path grep check (no stale matches).
+- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.kujo (pass); /path/to/kujo/target/debug/kujo run examples/main.kujo --interpreter (pass); /path/to/kujo/target/debug/kujo run scripts/stress_harness.kujo --interpreter (pass); README stale-path grep check (no stale matches).
 - README updated: Yes
 - Follow-up notes: Runtime import resolution now relies on explicit src module prefixes in examples/tests/scripts.
 
@@ -738,7 +738,7 @@ Template:
 - Task ID: D-02
 - Summary of change: Clarified metadata ownership and removed package-name mismatch between manifests.
 - Tests added/updated: No new tests required for metadata-only changes.
-- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.ruff (pass); /path/to/kujo/target/debug/kujo run examples/main.ruff --interpreter (pass); README path grep for stale commands (no stale matches).
+- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.kujo (pass); /path/to/kujo/target/debug/kujo run examples/main.kujo --interpreter (pass); README path grep for stale commands (no stale matches).
 - README updated: Yes
 - Follow-up notes: Keep canonical metadata updates in kennel.toml and mirror package identity in kujo.toml when needed.
 
@@ -746,7 +746,7 @@ Template:
 - Task ID: D-03
 - Summary of change: Added docs/PROVIDER_EXTENSION_GUIDE.md and linked it from README for contributor discoverability.
 - Tests added/updated: No test file changes; documentation-only task.
-- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.ruff (pass); /path/to/kujo/target/debug/kujo run examples/main.ruff --interpreter (pass); README command path grep (pass).
+- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.kujo (pass); /path/to/kujo/target/debug/kujo run examples/main.kujo --interpreter (pass); README command path grep (pass).
 - README updated: Yes
 - Follow-up notes: Guide includes a step-by-step provider onboarding checklist for consistent capability and contract validation.
 
@@ -754,7 +754,7 @@ Template:
 - Task ID: E-01
 - Summary of change: Added deterministic retry classification tests for HTTP status boundaries and non-HTTP fallback retryability behavior.
 - Tests added/updated: Added new contract tests for 429/499/500/599 boundaries and transport/provider fallback retryability handling.
-- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.ruff (pass).
+- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.kujo (pass).
 - README updated: No
 - Follow-up notes: Retry classification regressions now fail with targeted boundary assertions.
 
@@ -762,7 +762,7 @@ Template:
 - Task ID: E-02
 - Summary of change: Expanded parser and malformed payload coverage to explicitly validate edge-case normalization behavior.
 - Tests added/updated: Added tests for empty body, malformed JSON, non-dict provider error shape, and total-only usage payload handling.
-- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.ruff (pass).
+- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.kujo (pass).
 - README updated: No
 - Follow-up notes: parse_json_safe is exported as parse_json_contract for deterministic contract testing.
 
@@ -770,7 +770,7 @@ Template:
 - Task ID: E-03
 - Summary of change: Expanded streaming edge-case contract tests and hardened SSE parsing for multiline data-frame assembly.
 - Tests added/updated: Added tests for multiline SSE parsing and done markers, no-delta stream events, and done-callback exception normalization.
-- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.ruff (pass).
+- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.kujo (pass).
 - README updated: No
 - Follow-up notes: parse_sse_lines is exported as parse_sse_contract for targeted stream parser tests.
 
@@ -778,7 +778,7 @@ Template:
 - Task ID: E-04
 - Summary of change: Added CI freshness checks for key docs and README command/module path references.
 - Tests added/updated: No test file changes; CI workflow quality-gate step added.
-- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.ruff (pass).
+- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.kujo (pass).
 - README updated: No
 - Follow-up notes: CI now fails early if docs or command paths drift from repository structure.
 
@@ -786,7 +786,7 @@ Template:
 - Task ID: F-01
 - Summary of change: Added transport abstraction hook to allow injected request execution without real network calls.
 - Tests added/updated: Added injected transport success/error contract tests with deterministic mocked responses.
-- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.ruff (pass); /path/to/kujo/target/debug/kujo run examples/main.ruff --interpreter (pass).
+- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.kujo (pass); /path/to/kujo/target/debug/kujo run examples/main.kujo --interpreter (pass).
 - README updated: Yes
 - Follow-up notes: Transport injection supports alternative HTTP stacks and test-only network isolation.
 
@@ -794,7 +794,7 @@ Template:
 - Task ID: F-02
 - Summary of change: Added request lifecycle hook support and response-level observability counters for timing/retry/status instrumentation.
 - Tests added/updated: Added observability hook tests for start/complete and retry paths with injected transport.
-- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.ruff (pass); /path/to/kujo/target/debug/kujo run examples/main.ruff --interpreter (pass).
+- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.kujo (pass); /path/to/kujo/target/debug/kujo run examples/main.kujo --interpreter (pass).
 - README updated: Yes
 - Follow-up notes: Hook callback failures are safely ignored to avoid instrumentation-related request failures.
 
@@ -802,7 +802,7 @@ Template:
 - Task ID: F-03
 - Summary of change: Added embeddings endpoint API and normalized response flow with success/error handling and capability checks.
 - Tests added/updated: Added embeddings fixture, transport success, and unsupported-capability tests.
-- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.ruff (pass); /path/to/kujo/target/debug/kujo run examples/main.ruff --interpreter (pass).
+- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.kujo (pass); /path/to/kujo/target/debug/kujo run examples/main.kujo --interpreter (pass).
 - README updated: Yes
 - Follow-up notes: Provider presets now declare embeddings capability and custom providers default embeddings support to true.
 
@@ -810,31 +810,31 @@ Template:
 - Task ID: G-01
 - Summary of change: Removed root scratch Kujo artifacts and added hygiene guardrails in ignore policy and CI checks to prevent accidental reintroduction.
 - Tests added/updated: No new contract tests; CI workflow now includes scratch-file hygiene validation.
-- Commands run: rm -f test_assign.ruff test_closure.ruff test_closure_simple.ruff test_final.ruff test_read.ruff test_simple_f.ruff test_top_level.ruff; git ls-files --others --exclude-standard (pass/no output); /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.ruff (pass).
+- Commands run: rm -f test_assign.kujo test_closure.kujo test_closure_simple.kujo test_final.kujo test_read.kujo test_simple_f.kujo test_top_level.kujo; git ls-files --others --exclude-standard (pass/no output); /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.kujo (pass).
 - README updated: No
 - Follow-up notes: Root-level ad hoc scratch experiments should use ignored naming/path conventions to avoid repo noise.
 
 - Date: 2026-05-21
 - Task ID: G-02
 - Summary of change: Added release validation workflow and live-provider smoke contract test for OpenAI, DeepSeek, or OpenRouter when corresponding secrets are configured.
-- Tests added/updated: Added tests/live_provider_smoke_tests.ruff with deterministic skip behavior when no live-provider keys are present.
-- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.ruff (pass); /path/to/kujo/target/debug/kujo test-run tests/live_provider_smoke_tests.ruff (pass).
+- Tests added/updated: Added tests/live_provider_smoke_tests.kujo with deterministic skip behavior when no live-provider keys are present.
+- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.kujo (pass); /path/to/kujo/target/debug/kujo test-run tests/live_provider_smoke_tests.kujo (pass).
 - README updated: Yes
 - Follow-up notes: Release workflow surfaces provider-selection context and preserves deterministic behavior in secretless environments.
 
 - Date: 2026-05-21
 - Task ID: G-03
 - Summary of change: Added deterministic reliability failure-mode suite and integrated it into both CI and release validation workflows.
-- Tests added/updated: Added tests/reliability_failure_modes_tests.ruff covering timeout, 429 retry pressure, retry exhaustion, malformed SSE, partial JSON, and mixed-frame SSE parsing.
-- Commands run: /path/to/kujo/target/debug/kujo test-run tests/reliability_failure_modes_tests.ruff (pass); /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.ruff (pass); /path/to/kujo/target/debug/kujo test-run tests/live_provider_smoke_tests.ruff (pass).
+- Tests added/updated: Added tests/reliability_failure_modes_tests.kujo covering timeout, 429 retry pressure, retry exhaustion, malformed SSE, partial JSON, and mixed-frame SSE parsing.
+- Commands run: /path/to/kujo/target/debug/kujo test-run tests/reliability_failure_modes_tests.kujo (pass); /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.kujo (pass); /path/to/kujo/target/debug/kujo test-run tests/live_provider_smoke_tests.kujo (pass).
 - README updated: Yes
 - Follow-up notes: Reliability suite now acts as a first-class regression gate for critical failure handling behavior.
 
 - Date: 2026-05-21
 - Task ID: G-04
 - Summary of change: Added release-quality gate automation with parser fuzz/feature smoke suites and test-floor enforcement for release validation.
-- Tests added/updated: Added tests/parser_fuzz_smoke_tests.ruff and tests/feature_smoke_tests.ruff; added scripts/release_quality_gates.sh.
-- Commands run: /path/to/kujo/target/debug/kujo test-run tests/parser_fuzz_smoke_tests.ruff (pass); /path/to/kujo/target/debug/kujo test-run tests/feature_smoke_tests.ruff (pass); KUJO_BIN=/path/to/kujo/target/debug/kujo bash scripts/release_quality_gates.sh (pass, aggregate tests: 49).
+- Tests added/updated: Added tests/parser_fuzz_smoke_tests.kujo and tests/feature_smoke_tests.kujo; added scripts/release_quality_gates.sh.
+- Commands run: /path/to/kujo/target/debug/kujo test-run tests/parser_fuzz_smoke_tests.kujo (pass); /path/to/kujo/target/debug/kujo test-run tests/feature_smoke_tests.kujo (pass); KUJO_BIN=/path/to/kujo/target/debug/kujo bash scripts/release_quality_gates.sh (pass, aggregate tests: 49).
 - README updated: Yes
 - Follow-up notes: Release contract job now executes centralized quality-gate logic to catch regressions and threshold drift early.
 
@@ -850,7 +850,7 @@ Template:
 - Task ID: G-06
 - Summary of change: Added explicit contract versioning policy docs and embedded `contract_version` in normalized chat/stream/error/embeddings responses.
 - Tests added/updated: Added contract test asserting `contract_version` presence across success/error/embeddings responses.
-- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.ruff (pass); KUJO_BIN=/path/to/kujo/target/debug/kujo bash scripts/release_quality_gates.sh (pass).
+- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.kujo (pass); KUJO_BIN=/path/to/kujo/target/debug/kujo bash scripts/release_quality_gates.sh (pass).
 - README updated: Yes
 - Follow-up notes: Contract changes now require semantic versioning decisions and policy updates before merge.
 
@@ -858,7 +858,7 @@ Template:
 - Task ID: G-07
 - Summary of change: Added production safety limits for retries, prompt/tool request budgets, and in-flight concurrency limits with normalized fast-fail errors.
 - Tests added/updated: Added contract tests for retry_budget cap, prompt budget exceed, tool budget exceed, and max_in_flight_requests guard.
-- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.ruff (pass); KUJO_BIN=/path/to/kujo/target/debug/kujo bash scripts/release_quality_gates.sh (pass, aggregate tests: 54).
+- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.kujo (pass); KUJO_BIN=/path/to/kujo/target/debug/kujo bash scripts/release_quality_gates.sh (pass, aggregate tests: 54).
 - README updated: Yes
 - Follow-up notes: Safety controls are configurable per request and are intended to prevent runaway request characteristics under production load.
 
@@ -866,15 +866,15 @@ Template:
 - Task ID: G-08
 - Summary of change: Added OpenTelemetry-style hook mapping guide and telemetry bridge example for integrating SDK lifecycle events with observability pipelines.
 - Tests added/updated: No new contract tests; validated runnable telemetry bridge example and full release quality gates.
-- Commands run: /path/to/kujo/target/debug/kujo run examples/telemetry_bridge.ruff --interpreter (pass); KUJO_BIN=/path/to/kujo/target/debug/kujo bash scripts/release_quality_gates.sh (pass).
+- Commands run: /path/to/kujo/target/debug/kujo run examples/telemetry_bridge.kujo --interpreter (pass); KUJO_BIN=/path/to/kujo/target/debug/kujo bash scripts/release_quality_gates.sh (pass).
 - README updated: Yes
 - Follow-up notes: Example demonstrates retry lifecycle and final normalized response telemetry emission in JSON form.
 
 - Date: 2026-05-21
 - Task ID: G-09
 - Summary of change: Added production defaults and incident runbook documentation plus runnable production-profile example and quality-gate smoke integration.
-- Tests added/updated: No new test suites; extended release quality smoke commands to run examples/production_profile.ruff.
-- Commands run: /path/to/kujo/target/debug/kujo run examples/production_profile.ruff --interpreter (pass); KUJO_BIN=/path/to/kujo/target/debug/kujo bash scripts/release_quality_gates.sh (pass).
+- Tests added/updated: No new test suites; extended release quality smoke commands to run examples/production_profile.kujo.
+- Commands run: /path/to/kujo/target/debug/kujo run examples/production_profile.kujo --interpreter (pass); KUJO_BIN=/path/to/kujo/target/debug/kujo bash scripts/release_quality_gates.sh (pass).
 - README updated: Yes
 - Follow-up notes: Runbook includes triage workflow, escalation criteria, and targeted mitigation playbooks for common failure classes.
 
@@ -882,7 +882,7 @@ Template:
 - Task ID: H-01
 - Summary of change: Refactored chat/embeddings hot paths to use one-pass resolved options for transport and payload construction.
 - Tests added/updated: Updated contract suite coverage remained green after one-pass refactor.
-- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.ruff (pass); KUJO_BIN=/path/to/kujo/target/debug/kujo bash scripts/release_quality_gates.sh (pass).
+- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.kujo (pass); KUJO_BIN=/path/to/kujo/target/debug/kujo bash scripts/release_quality_gates.sh (pass).
 - README updated: No
 - Follow-up notes: Resolved-option helper functions now centralize option reuse in request-path internals.
 
@@ -890,7 +890,7 @@ Template:
 - Task ID: H-02
 - Summary of change: Added retry jitter and optional request-scope circuit-breaker controls with deterministic contract-test coverage.
 - Tests added/updated: Added retry-delay contract test and circuit-breaker open-path test in sdk contract suite; expanded defaults/override assertions for new options.
-- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.ruff (pass); KUJO_BIN=/path/to/kujo/target/debug/kujo bash scripts/release_quality_gates.sh (pass).
+- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.kujo (pass); KUJO_BIN=/path/to/kujo/target/debug/kujo bash scripts/release_quality_gates.sh (pass).
 - README updated: Yes
 - Follow-up notes: Circuit breaker currently scopes to a single request retry loop, providing fast-fail protection during repeated retryable failures.
 
@@ -898,7 +898,7 @@ Template:
 - Task ID: H-03
 - Summary of change: Added half-open probe recovery mode to circuit breaker with explicit probe retry controls.
 - Tests added/updated: Added half-open probe contract test and expanded defaults/override assertions for half-open options.
-- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.ruff --verbose (pass); KUJO_BIN=/path/to/kujo/target/debug/kujo bash scripts/release_quality_gates.sh (pass, aggregate tests: 57).
+- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.kujo --verbose (pass); KUJO_BIN=/path/to/kujo/target/debug/kujo bash scripts/release_quality_gates.sh (pass, aggregate tests: 57).
 - README updated: Yes
 - Follow-up notes: Breaker now blocks during active cooldown, then runs configurable low-risk probes before normal retry behavior resumes.
 
@@ -906,7 +906,7 @@ Template:
 - Task ID: I-01
 - Summary of change: Added shared-state backend hooks for breaker/governance state with namespace support and deterministic fallback behavior.
 - Tests added/updated: Added state backend option coverage and shared-breaker contract test updates.
-- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.ruff -v (pass).
+- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.kujo -v (pass).
 - README updated: No
 - Follow-up notes: Backend supports dict state, functional get/set, and registry-id patterns for integration flexibility.
 
@@ -914,7 +914,7 @@ Template:
 - Task ID: I-02
 - Summary of change: Implemented incremental SSE chunk parsing and stream-chunk transport ingestion path.
 - Tests added/updated: Added chunked SSE stream contract test and parser export updates.
-- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.ruff -v (pass).
+- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.kujo -v (pass).
 - README updated: No
 - Follow-up notes: Stream requests now prioritize `_stream_chunks`/`stream_chunks` before body-level SSE parsing.
 
@@ -922,7 +922,7 @@ Template:
 - Task ID: I-03
 - Summary of change: Added connect/read/overall timeout tiers plus absolute deadline propagation and fail-fast deadline exceeded handling.
 - Tests added/updated: Expanded defaults/override coverage and added deadline short-circuit contract test.
-- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.ruff -v (pass).
+- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.kujo -v (pass).
 - README updated: No
 - Follow-up notes: Retry loop now respects overall deadline bounds across attempts.
 
@@ -930,7 +930,7 @@ Template:
 - Task ID: I-04
 - Summary of change: Added structured output guarantee mode with JSON and required-field validation.
 - Tests added/updated: Added deterministic structured output invalid/success contract tests.
-- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.ruff -v (pass).
+- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.kujo -v (pass).
 - README updated: No
 - Follow-up notes: Validation errors return `structured_output_invalid` with schema-aware diagnostics.
 
@@ -938,15 +938,15 @@ Template:
 - Task ID: I-05
 - Summary of change: Added provider fallback orchestration with retryability-gated failover and per-fallback option overrides.
 - Tests added/updated: Added fallback-success and non-retryable-no-fallback contract tests.
-- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.ruff -v (pass).
+- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.kujo -v (pass).
 - README updated: No
 - Follow-up notes: Fallback metadata is attached to fallback-attempt results for traceability.
 
 - Date: 2026-05-21
 - Task ID: I-06
 - Summary of change: Added benchmark quality-gate script and integrated it into CI and release-quality scripts.
-- Tests added/updated: Added scripts/benchmark_quality_gate.ruff and workflow/script gate steps.
-- Commands run: /path/to/kujo/target/debug/kujo run scripts/benchmark_quality_gate.ruff --interpreter (pass).
+- Tests added/updated: Added scripts/benchmark_quality_gate.kujo and workflow/script gate steps.
+- Commands run: /path/to/kujo/target/debug/kujo run scripts/benchmark_quality_gate.kujo --interpreter (pass).
 - README updated: No
 - Follow-up notes: Gate validates average latency and throughput against conservative thresholds.
 
@@ -954,7 +954,7 @@ Template:
 - Task ID: I-07
 - Summary of change: Added queue-based admission control with configurable wait timeout and poll interval.
 - Tests added/updated: Added queue timeout contract coverage under saturated in-flight slots.
-- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.ruff -v (pass).
+- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.kujo -v (pass).
 - README updated: No
 - Follow-up notes: Saturation can now wait briefly before deterministic `concurrency_queue_timeout` failure.
 
@@ -962,7 +962,7 @@ Template:
 - Task ID: I-08
 - Summary of change: Added per-request token and rolling token/cost governance budgets with backend-aware persistence.
 - Tests added/updated: Added governance contract tests for per-request, rolling-token, and rolling-cost exceedance scenarios.
-- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.ruff -v (pass).
+- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.kujo -v (pass).
 - README updated: No
 - Follow-up notes: Governance failures are normalized as `governance_budget_exceeded` with budget-type details.
 
@@ -970,7 +970,7 @@ Template:
 - Task ID: I-09
 - Summary of change: Added trace/request identifiers and duration metrics to request observability payloads.
 - Tests added/updated: Expanded observability contract assertions for correlation IDs and request durations.
-- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.ruff -v (pass).
+- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.kujo -v (pass).
 - README updated: No
 - Follow-up notes: Aggregated observability now preserves per-attempt correlation metadata.
 
@@ -978,7 +978,7 @@ Template:
 - Task ID: I-10
 - Summary of change: Added recursive sensitive-field redaction for raw success/error payload surfaces.
 - Tests added/updated: Added contract test verifying redaction of common secret-bearing key/value patterns.
-- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.ruff (pass).
+- Commands run: /path/to/kujo/target/debug/kujo test-run tests/sdk_contract_tests.kujo (pass).
 - README updated: No
 - Follow-up notes: Redaction is applied before normalized payloads are returned to callers.
 
@@ -986,7 +986,7 @@ Template:
 - Task ID: I-11
 - Summary of change: Expanded reliability suite with deterministic retry-storm and malformed-stream burst scenarios.
 - Tests added/updated: Added two new reliability failure-mode tests and stabilized malformed-burst assertions.
-- Commands run: /path/to/kujo/target/debug/kujo test-run tests/reliability_failure_modes_tests.ruff (pass).
+- Commands run: /path/to/kujo/target/debug/kujo test-run tests/reliability_failure_modes_tests.kujo (pass).
 - README updated: No
 - Follow-up notes: Reliability suite now better captures long-sequence degradation patterns.
 

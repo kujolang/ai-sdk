@@ -24,15 +24,14 @@ jobs:
           set -euo pipefail
           # Pin runtime source for reproducible CI builds.
           git init /tmp/kujo-runtime
-          git -C /tmp/kujo-runtime remote add origin https://github.com/rufflang/ruff.git
+          git -C /tmp/kujo-runtime remote add origin https://github.com/kujolang/kujo.git
           git -C /tmp/kujo-runtime fetch --depth 1 origin "$KUJO_RUNTIME_REF"
           git -C /tmp/kujo-runtime checkout --detach "$KUJO_RUNTIME_REF"
           cargo build --release --locked --manifest-path /tmp/kujo-runtime/Cargo.toml
-          ln -sf /tmp/kujo-runtime/target/release/ruff /tmp/kujo-runtime/target/release/kujo
-          echo "/tmp/kujo-runtime/target/release" >> "$GITHUB_PATH"
+          echo "KUJO_BIN=/tmp/kujo-runtime/target/release/kujo" >> "$GITHUB_ENV"
 
       - name: Verify Kujo runtime
-        run: kujo --version
+        run: ./kujo --version
 
       - name: Verify docs and command freshness
         shell: bash
@@ -40,22 +39,22 @@ jobs:
           set -euo pipefail
           test -f docs/SDK_IMPROVEMENT_CHECKLIST.md
           test -f docs/PROVIDER_EXTENSION_GUIDE.md
-          grep -q '"$KUJO_BIN" run examples/main.ruff' README.md
-          grep -q '"$KUJO_BIN" run scripts/stress_harness.ruff' README.md
-          grep -q 'export KUJO_BIN="${KUJO_BIN:-kujo}"' README.md
-          grep -q 'export KUJO_BIN="${KUJO_BIN:-kujo}"' docs/PROVIDER_EXTENSION_GUIDE.md
+          grep -q './kujo run examples/main.kujo' README.md
+          grep -q './kujo run scripts/stress_harness.kujo' README.md
+          grep -q 'export KUJO_BIN="${KUJO_BIN:-/path/to/kujo/target/debug/kujo}"' README.md
+          grep -q 'export KUJO_BIN="${KUJO_BIN:-/path/to/kujo/target/debug/kujo}"' docs/PROVIDER_EXTENSION_GUIDE.md
           if grep -q '/Users/robertdevore/2026/' README.md docs/PROVIDER_EXTENSION_GUIDE.md; then
             echo "Found machine-specific Kujo runtime paths in docs."
             exit 1
           fi
-          grep -q "src/ai_sdk.ruff" README.md
-          grep -q "src/providers.ruff" README.md
+          grep -q "src/ai_sdk.kujo" README.md
+          grep -q "src/providers.kujo" README.md
 
       - name: Reject root scratch Kujo files
         shell: bash
         run: |
           set -euo pipefail
-          scratch_files="$(find . -maxdepth 1 -type f -name 'test_*.ruff' -print)"
+          scratch_files="$(find . -maxdepth 1 -type f -name 'test_*.kujo' -print)"
           if [ -n "$scratch_files" ]; then
             echo "Found disallowed root scratch Kujo files:"
             echo "$scratch_files"

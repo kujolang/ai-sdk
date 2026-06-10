@@ -108,11 +108,11 @@ Validation:
 ## Standard Validation Commands
 
 ```bash
-kujo test-run tests/sdk_contract_tests.ruff
-kujo test-run tests/reliability_failure_modes_tests.ruff
-kujo test-run tests/parser_fuzz_smoke_tests.ruff
-kujo test-run tests/feature_smoke_tests.ruff
-kujo run examples/production_profile.ruff --interpreter
+./kujo test-run tests/sdk_contract_tests.kujo
+./kujo test-run tests/reliability_failure_modes_tests.kujo
+./kujo test-run tests/parser_fuzz_smoke_tests.kujo
+./kujo test-run tests/feature_smoke_tests.kujo
+./kujo run examples/production_profile.kujo --interpreter
 ```
 
 ## Escalation Criteria

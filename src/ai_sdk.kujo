@@ -485,7 +485,7 @@ func fixture_response_impl(client) {
 		"ok": true,
 		"provider": client["provider"]["name"],
 		"contract_version": contract_version_value(),
-		"request_id": "chatcmpl-ruff-fixture-1",
+		"request_id": "chatcmpl-kujo-fixture-1",
 		"model": client["provider"]["default_model"],
 		"output_text": "Standardized AI SDK responses reduce integration complexity and speed up development.",
 		"finish_reason": "stop",
@@ -498,7 +498,7 @@ func fixture_response_impl(client) {
 		"status_code": 200,
 		"normalized_at": current_timestamp(),
 		"raw": {
-			"id": "chatcmpl-ruff-fixture-1",
+			"id": "chatcmpl-kujo-fixture-1",
 			"model": client["provider"]["default_model"]
 		}
 	}

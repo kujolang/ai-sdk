@@ -30,15 +30,14 @@ jobs:
         run: |
           set -euo pipefail
           git init /tmp/kujo-runtime
-          git -C /tmp/kujo-runtime remote add origin https://github.com/rufflang/ruff.git
+          git -C /tmp/kujo-runtime remote add origin https://github.com/kujolang/kujo.git
           git -C /tmp/kujo-runtime fetch --depth 1 origin "$KUJO_RUNTIME_REF"
           git -C /tmp/kujo-runtime checkout --detach "$KUJO_RUNTIME_REF"
           cargo build --release --locked --manifest-path /tmp/kujo-runtime/Cargo.toml
-          ln -sf /tmp/kujo-runtime/target/release/ruff /tmp/kujo-runtime/target/release/kujo
-          echo "/tmp/kujo-runtime/target/release" >> "$GITHUB_PATH"
+          echo "KUJO_BIN=/tmp/kujo-runtime/target/release/kujo" >> "$GITHUB_ENV"
 
       - name: Verify Kujo runtime
-        run: kujo --version
+        run: ./kujo --version
 
       - name: Run release quality gates
         shell: bash
@@ -68,15 +67,14 @@ jobs:
         run: |
           set -euo pipefail
           git init /tmp/kujo-runtime
-          git -C /tmp/kujo-runtime remote add origin https://github.com/rufflang/ruff.git
+          git -C /tmp/kujo-runtime remote add origin https://github.com/kujolang/kujo.git
           git -C /tmp/kujo-runtime fetch --depth 1 origin "$KUJO_RUNTIME_REF"
           git -C /tmp/kujo-runtime checkout --detach "$KUJO_RUNTIME_REF"
           cargo build --release --locked --manifest-path /tmp/kujo-runtime/Cargo.toml
-          ln -sf /tmp/kujo-runtime/target/release/ruff /tmp/kujo-runtime/target/release/kujo
-          echo "/tmp/kujo-runtime/target/release" >> "$GITHUB_PATH"
+          echo "KUJO_BIN=/tmp/kujo-runtime/target/release/kujo" >> "$GITHUB_ENV"
 
       - name: Verify Kujo runtime
-        run: kujo --version
+        run: ./kujo --version
 
       - name: Announce live-provider mode
         shell: bash
@@ -114,7 +112,7 @@ jobs:
           exit 1
 
       - name: Run live-provider smoke test
-        run: kujo test-run tests/live_provider_smoke_tests.ruff
+        run: ./kujo test-run tests/live_provider_smoke_tests.kujo
 
   supply-chain-security:
     runs-on: ubuntu-latest

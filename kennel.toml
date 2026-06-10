@@ -17,9 +17,9 @@ stability = "early"
 public_api = true
 notes = "API contracts are designed to be stable, but this package remains pre-1.0."
 
-[ruff]
+[kujo]
 minimum_version = "0.1.0"
-entry = "examples/main.ruff"
+entry = "examples/main.kujo"
 sources = ["src", "."]
 includes = ["README.md", "tests"]
 excludes = [".git", "kennel_packages", "dist", "build", "node_modules"]
@@ -34,15 +34,15 @@ artifacts = []
 [dev-dependencies]
 
 [scripts]
-test = "kujo test-run tests/sdk_contract_tests.ruff"
-stress = "kujo run scripts/stress_harness.ruff --interpreter"
+test = "./kujo test-run tests/sdk_contract_tests.kujo"
+stress = "./kujo run scripts/stress_harness.kujo --interpreter"
 
 [package.exports]
-core = "src/ai_sdk.ruff"
-providers = "src/providers.ruff"
+core = "src/ai_sdk.kujo"
+providers = "src/providers.kujo"
 
 [package.metadata]
-contract_tests = "tests/sdk_contract_tests.ruff"
+contract_tests = "tests/sdk_contract_tests.kujo"
 
 [registry]
 index = ""

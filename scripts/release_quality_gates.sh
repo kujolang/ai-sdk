@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-RUNTIME_BIN="${KUJO_BIN:-kujo}"
-if ! command -v "$RUNTIME_BIN" >/dev/null 2>&1; then
-	if command -v ruff >/dev/null 2>&1; then
-		RUNTIME_BIN="ruff"
-	fi
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+WRAPPER_BIN="$ROOT_DIR/kujo"
+
+if [[ -z "${KUJO_BIN:-}" ]]; then
+	echo "Set KUJO_BIN to the Kujo runtime binary path."
+	exit 1
 fi
 
 run_runtime_command_with_warning_gate() {
@@ -13,7 +14,7 @@ run_runtime_command_with_warning_gate() {
 	shift
 
 	echo "Running ${command_label}: $*"
-	output="$($RUNTIME_BIN "$@" 2>&1)"
+	output="$(KUJO_BIN="$KUJO_BIN" "$WRAPPER_BIN" "$@" 2>&1)"
 	echo "$output"
 
 	if echo "$output" | grep -q "Type checking warnings:"; then
@@ -27,7 +28,7 @@ run_test_suite_with_floor() {
 	local min_tests="$2"
 
 	echo "Running quality gate suite: ${test_file}"
-	output="$($RUNTIME_BIN test-run "$test_file")"
+	output="$(KUJO_BIN="$KUJO_BIN" "$WRAPPER_BIN" test-run "$test_file")"
 	echo "$output"
 
 	total_tests="$(echo "$output" | sed -n 's/.*Tests:[[:space:]]*\([0-9][0-9]*\)[[:space:]]*total.*/\1/p' | tail -n 1)"
@@ -47,24 +48,24 @@ run_test_suite_with_floor() {
 TOTAL_TEST_COUNT=0
 MIN_TOTAL_TEST_FLOOR=57
 
-run_test_suite_with_floor tests/sdk_contract_tests.ruff 20
-run_test_suite_with_floor tests/sdk_contract_resilience_tests.ruff 34
-run_test_suite_with_floor tests/sdk_contract_embeddings_tests.ruff 6
-run_test_suite_with_floor tests/security_redaction_tests.ruff 2
-run_test_suite_with_floor tests/reliability_failure_modes_tests.ruff 6
-run_test_suite_with_floor tests/parser_fuzz_smoke_tests.ruff 3
-run_test_suite_with_floor tests/feature_smoke_tests.ruff 3
-run_test_suite_with_floor tests/live_provider_smoke_tests.ruff 1
+run_test_suite_with_floor tests/sdk_contract_tests.kujo 20
+run_test_suite_with_floor tests/sdk_contract_resilience_tests.kujo 34
+run_test_suite_with_floor tests/sdk_contract_embeddings_tests.kujo 6
+run_test_suite_with_floor tests/security_redaction_tests.kujo 2
+run_test_suite_with_floor tests/reliability_failure_modes_tests.kujo 6
+run_test_suite_with_floor tests/parser_fuzz_smoke_tests.kujo 3
+run_test_suite_with_floor tests/feature_smoke_tests.kujo 3
+run_test_suite_with_floor tests/live_provider_smoke_tests.kujo 1
 
 if (( TOTAL_TEST_COUNT < MIN_TOTAL_TEST_FLOOR )); then
 	echo "Aggregate quality floor violation: expected at least ${MIN_TOTAL_TEST_FLOOR} tests, got ${TOTAL_TEST_COUNT}."
 	exit 1
 fi
 
-run_runtime_command_with_warning_gate "feature smoke command" run examples/main.ruff
-run_runtime_command_with_warning_gate "feature smoke command" run examples/production_profile.ruff
+run_runtime_command_with_warning_gate "feature smoke command" run examples/main.kujo
+run_runtime_command_with_warning_gate "feature smoke command" run examples/production_profile.kujo
 echo "Running contract schema verification: scripts/verify_contract_schemas.sh"
 bash scripts/verify_contract_schemas.sh
-run_runtime_command_with_warning_gate "benchmark quality gate" run scripts/benchmark_quality_gate.ruff
+run_runtime_command_with_warning_gate "benchmark quality gate" run scripts/benchmark_quality_gate.kujo
 
 echo "Release quality gates passed with aggregate test count: ${TOTAL_TEST_COUNT}."

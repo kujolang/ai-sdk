@@ -4,7 +4,7 @@ This guide explains how to add a new provider preset and validate capability beh
 
 ## 1) Add a Provider Preset
 
-Edit `src/providers.ruff` and add a new exported provider function.
+Edit `src/providers.kujo` and add a new exported provider function.
 
 Required fields:
 - `name`
@@ -16,7 +16,7 @@ Required fields:
 
 Example shape:
 
-```ruff
+```kujo
 export my_provider := func() {
 	return {
 		"name": "my-provider",
@@ -45,7 +45,7 @@ Incorrect capability flags can cause runtime contract errors or unsupported feat
 
 ## 3) Add Contract Tests
 
-Update `tests/sdk_contract_tests.ruff` with provider-focused tests:
+Update `tests/sdk_contract_tests.kujo` with provider-focused tests:
 - Preset shape test (required keys exist)
 - Capability checks using `provider_supports(...)`
 - Auth error behavior (`auth_error`) when key is missing
@@ -56,16 +56,16 @@ Update `tests/sdk_contract_tests.ruff` with provider-focused tests:
 Run:
 
 ```bash
-export KUJO_BIN="${KUJO_BIN:-kujo}"
-"$KUJO_BIN" test-run --help >/dev/null
-"$KUJO_BIN" test-run tests/sdk_contract_tests.ruff
-"$KUJO_BIN" run examples/main.ruff
+export KUJO_BIN="${KUJO_BIN:-/path/to/kujo/target/debug/kujo}"
+./kujo test-run --help >/dev/null
+./kujo test-run tests/sdk_contract_tests.kujo
+./kujo run examples/main.kujo
 ```
 
 If your change affects streaming/retry behavior, also run:
 
 ```bash
-"$KUJO_BIN" run scripts/stress_harness.ruff
+./kujo run scripts/stress_harness.kujo
 ```
 
 ## 5) README and Checklist Updates
@@ -77,7 +77,7 @@ When a provider is added or capability behavior changes:
 
 ## Repeatable Provider Addition Checklist
 
-- [ ] Added provider export in `src/providers.ruff`
+- [ ] Added provider export in `src/providers.kujo`
 - [ ] Included full required provider fields
 - [ ] Set accurate capability flags
 - [ ] Added/updated contract tests

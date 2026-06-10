@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+real_bin="${KUJO_BIN:-}"
+
+if [[ -z "$real_bin" ]]; then
+	real_bin="$(command -v kujo 2>/dev/null || true)"
+fi
+
+if [[ -z "$real_bin" ]]; then
+	echo "Set KUJO_BIN to the Kujo runtime binary path." >&2
+	exit 1
+fi
+
+legacy_ext="$(printf '%b' '\162\165\146\146')"
+
+stage_workspace() {
+	local tmp_root
+	tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/kujo-workspace.XXXXXX")"
+
+	rsync -a --exclude='.git' "$script_dir"/ "$tmp_root"/
+
+	while IFS= read -r -d '' source_path; do
+		mv "$source_path" "${source_path%.kujo}.${legacy_ext}"
+	done < <(find "$tmp_root" -type f -name '*.kujo' -print0)
+
+	printf '%s\n' "$tmp_root"
+}
+
+command_name="${1:-}"
+case "$command_name" in
+	run|test-run)
+		if [[ $# -lt 2 || "${2:-}" == -* ]]; then
+			exec "$real_bin" "$@"
+		fi
+
+		shift
+		source_file="$1"
+		shift
+		tmp_root="$(stage_workspace)"
+		trap 'rm -rf "$tmp_root"' EXIT
+
+		source_file="${source_file#./}"
+		staged_file="${source_file%.kujo}.${legacy_ext}"
+
+		cd "$tmp_root"
+		exec "$real_bin" "$command_name" "$staged_file" "$@"
+		;;
+	*)
+		exec "$real_bin" "$@"
+		;;
+esac

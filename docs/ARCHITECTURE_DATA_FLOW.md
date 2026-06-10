@@ -4,10 +4,10 @@ This document explains how requests move through Kujo AI SDK and where reliabili
 
 ## System Components
 
-- `src/providers.ruff`: provider presets and custom endpoint validation.
-- `src/ai_sdk.ruff`: request execution engine, normalization, retries, budgets, breaker, fallback, and observability.
-- `examples/*.ruff`: runnable usage profiles.
-- `tests/*.ruff`: contract and failure-mode validation.
+- `src/providers.kujo`: provider presets and custom endpoint validation.
+- `src/ai_sdk.kujo`: request execution engine, normalization, retries, budgets, breaker, fallback, and observability.
+- `examples/*.kujo`: runnable usage profiles.
+- `tests/*.kujo`: contract and failure-mode validation.
 
 ## End-to-End Request Lifecycle
 

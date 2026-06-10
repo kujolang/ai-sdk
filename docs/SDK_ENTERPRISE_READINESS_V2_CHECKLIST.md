@@ -53,7 +53,7 @@ Dependencies: None
 Why:
 - Faster, more deterministic feedback and easier fault isolation.
 Acceptance:
-- `tests/sdk_contract_tests.ruff` is split into focused suites (for example: core, governance, observability, embeddings).
+- `tests/sdk_contract_tests.kujo` is split into focused suites (for example: core, governance, observability, embeddings).
 - Aggregate coverage is preserved or improved.
 - Release quality gate references updated suite list and floors.
 
@@ -191,64 +191,64 @@ Acceptance:
 
 - Date: 2026-05-23
 - Task ID: V2-PERF-01
-- Summary: Split `tests/sdk_contract_tests.ruff` into focused suites (`tests/sdk_contract_tests.ruff`, `tests/sdk_contract_resilience_tests.ruff`, `tests/sdk_contract_embeddings_tests.ruff`) and updated release gates/floors to match.
-- Tests/validations run: `kujo test-run tests/sdk_contract_tests.ruff -v` (20/20 pass), `kujo test-run tests/sdk_contract_embeddings_tests.ruff -v` (6/6 pass), `kujo test-run tests/reliability_failure_modes_tests.ruff -v` (8/8 pass), `kujo test-run tests/parser_fuzz_smoke_tests.ruff -v` (3/3 pass), `kujo test-run tests/feature_smoke_tests.ruff -v` (3/3 pass), `kujo run examples/main.ruff --interpreter` (fixture mode success). `kujo test-run tests/sdk_contract_resilience_tests.ruff -v` was attempted repeatedly but did not produce completion output in this local terminal session.
+- Summary: Split `tests/sdk_contract_tests.kujo` into focused suites (`tests/sdk_contract_tests.kujo`, `tests/sdk_contract_resilience_tests.kujo`, `tests/sdk_contract_embeddings_tests.kujo`) and updated release gates/floors to match.
+- Tests/validations run: `kujo test-run tests/sdk_contract_tests.kujo -v` (20/20 pass), `kujo test-run tests/sdk_contract_embeddings_tests.kujo -v` (6/6 pass), `kujo test-run tests/reliability_failure_modes_tests.kujo -v` (8/8 pass), `kujo test-run tests/parser_fuzz_smoke_tests.kujo -v` (3/3 pass), `kujo test-run tests/feature_smoke_tests.kujo -v` (3/3 pass), `kujo run examples/main.kujo --interpreter` (fixture mode success). `kujo test-run tests/sdk_contract_resilience_tests.kujo -v` was attempted repeatedly but did not produce completion output in this local terminal session.
 - README/docs updated: README testing section updated with split suite commands; this checklist updated with loop completion log.
-- Follow-up notes: Investigate local execution hang/no-completion behavior for `tests/sdk_contract_resilience_tests.ruff` and further split that suite if needed for deterministic CI/runtime feedback.
+- Follow-up notes: Investigate local execution hang/no-completion behavior for `tests/sdk_contract_resilience_tests.kujo` and further split that suite if needed for deterministic CI/runtime feedback.
 
 - Date: 2026-05-23
 - Task ID: V2-PERF-02
 - Summary: Expanded benchmark quality gate into request-path micro-bench guardrails for chat and embeddings, covering both normalization and retry paths with explicit latency/throughput thresholds.
-- Tests/validations run: `kujo run scripts/benchmark_quality_gate.ruff --interpreter` (pass) with case outputs for `chat_normalization_path`, `embeddings_normalization_path`, `chat_retry_path`, and `embeddings_retry_path`.
+- Tests/validations run: `kujo run scripts/benchmark_quality_gate.kujo --interpreter` (pass) with case outputs for `chat_normalization_path`, `embeddings_normalization_path`, `chat_retry_path`, and `embeddings_retry_path`.
 - README/docs updated: README release-gate testing section now documents that benchmark guardrails include chat/embeddings normalization and retry-path thresholds.
 - Follow-up notes: Revisit thresholds periodically as runtime performance evolves to keep guardrails strict enough to catch regressions without causing flaky failures.
 
 - Date: 2026-05-23
 - Task ID: V2-PERF-03
 - Summary: Reduced request-loop recomputation overhead by precomputing chat payload/budget checks once per request and prebuilding embeddings request context (headers/url/transport/body) once before retry loops.
-- Tests/validations run: `kujo test-run tests/sdk_contract_tests.ruff -v` (20/20 pass), `kujo test-run tests/sdk_contract_embeddings_tests.ruff -v` (6/6 pass), `kujo run scripts/benchmark_quality_gate.ruff --interpreter` (pass). Benchmark sample: chat normalization avg 9.98ms, embeddings normalization avg 9.99ms, chat retry avg 36.85ms, embeddings retry avg 25.23ms.
+- Tests/validations run: `kujo test-run tests/sdk_contract_tests.kujo -v` (20/20 pass), `kujo test-run tests/sdk_contract_embeddings_tests.kujo -v` (6/6 pass), `kujo run scripts/benchmark_quality_gate.kujo --interpreter` (pass). Benchmark sample: chat normalization avg 9.98ms, embeddings normalization avg 9.99ms, chat retry avg 36.85ms, embeddings retry avg 25.23ms.
 - README/docs updated: Checklist session log updated with optimization scope and benchmark deltas.
 - Follow-up notes: If future hot paths are added, prefer extending precomputed request-context patterns to avoid per-retry recomputation regressions.
 
 - Date: 2026-05-23
 - Task ID: V2-SEC-01
 - Summary: Added optional endpoint allowlist policy mode to request options (`endpoint_allowlist_enabled`, `endpoint_allowlist_hosts`) and enforced it across both chat and embeddings network paths.
-- Tests/validations run: `kujo test-run tests/sdk_contract_tests.ruff -v` (22/22 pass, including allowlist allow/block cases), `kujo test-run tests/feature_smoke_tests.ruff -v` (3/3 pass).
+- Tests/validations run: `kujo test-run tests/sdk_contract_tests.kujo -v` (22/22 pass, including allowlist allow/block cases), `kujo test-run tests/feature_smoke_tests.kujo -v` (3/3 pass).
 - README/docs updated: README default limits and operational safety controls now document endpoint allowlist policy options.
 - Follow-up notes: Current host parsing is intentionally strict/simple for standard host formats; extend parser handling if IPv6 literal endpoints are needed.
 
 - Date: 2026-05-23
 - Task ID: V2-SEC-02
 - Summary: Expanded sensitive-data redaction patterns for additional key aliases (for example `api-key`, `clientSecret`, `private_key`, `jwt_token`, credential-derived keys) and common secret value formats, and added a dedicated security redaction test suite.
-- Tests/validations run: `kujo test-run tests/security_redaction_tests.ruff -v` (2/2 pass), `kujo test-run tests/sdk_contract_tests.ruff -v` (22/22 pass).
-- README/docs updated: README testing section now includes `tests/security_redaction_tests.ruff`; release quality gate includes this suite with a minimum floor.
+- Tests/validations run: `kujo test-run tests/security_redaction_tests.kujo -v` (2/2 pass), `kujo test-run tests/sdk_contract_tests.kujo -v` (22/22 pass).
+- README/docs updated: README testing section now includes `tests/security_redaction_tests.kujo`; release quality gate includes this suite with a minimum floor.
 - Follow-up notes: Because `contains()` can be int-like in this runtime, negative leak tests use replace/length assertions for deterministic behavior.
 
 - Date: 2026-05-23
 - Task ID: V2-SEC-03
 - Summary: Hardened custom provider base URL validation to reject query-string and fragment URL forms with deterministic validation messages.
-- Tests/validations run: `kujo test-run tests/sdk_contract_tests.ruff -v` (23/23 pass, includes strict query/fragment URL rejection test), `kujo test-run tests/feature_smoke_tests.ruff -v` (3/3 pass).
+- Tests/validations run: `kujo test-run tests/sdk_contract_tests.kujo -v` (23/23 pass, includes strict query/fragment URL rejection test), `kujo test-run tests/feature_smoke_tests.kujo -v` (3/3 pass).
 - README/docs updated: README custom provider endpoint validation now documents accepted URL format and explicit query/fragment restrictions.
 - Follow-up notes: If future provider integrations need signed query endpoints, add an explicit opt-in mode rather than weakening default validation.
 
 - Date: 2026-05-23
 - Task ID: V2-FUNC-01
 - Summary: Added embeddings fallback-provider support with parity to chat fallback semantics, including retryable-primary failover and non-retryable short-circuit behavior.
-- Tests/validations run: `kujo test-run tests/sdk_contract_embeddings_tests.ruff -v` (8/8 pass, includes new fallback success/skip cases), `kujo test-run tests/sdk_contract_tests.ruff -v` (23/23 pass).
+- Tests/validations run: `kujo test-run tests/sdk_contract_embeddings_tests.kujo -v` (8/8 pass, includes new fallback success/skip cases), `kujo test-run tests/sdk_contract_tests.kujo -v` (23/23 pass).
 - README/docs updated: README fallback provider control now explicitly states chat+embeddings parity.
 - Follow-up notes: Add provider-level fallback telemetry rollups if future adoption needs per-provider failover rate reporting.
 
 - Date: 2026-05-23
 - Task ID: V2-FUNC-02
 - Summary: Added embeddings observability parity by attaching aggregated `start_count`/`complete_count`/`retry_count` counters and trace metadata across retries, plus safe start/complete/retry hook integration in embeddings request flow.
-- Tests/validations run: `kujo test-run tests/sdk_contract_embeddings_tests.ruff -v` (10/10 pass, includes observability counter and hook-safety tests), `kujo test-run tests/sdk_contract_tests.ruff -v` (23/23 pass).
+- Tests/validations run: `kujo test-run tests/sdk_contract_embeddings_tests.kujo -v` (10/10 pass, includes observability counter and hook-safety tests), `kujo test-run tests/sdk_contract_tests.kujo -v` (23/23 pass).
 - README/docs updated: README observability section now explicitly states chat+embeddings observability counter parity.
 - Follow-up notes: If needed, add per-attempt hook audit artifacts in future debug builds for deeper observability troubleshooting.
 
 - Date: 2026-05-23
 - Task ID: V2-FUNC-03
 - Summary: Added explicit embeddings deadline semantics by honoring `overall_timeout_ms` and `deadline_ms`, including bounded retry sleeps and deterministic `deadline_exceeded` behavior.
-- Tests/validations run: `kujo test-run tests/sdk_contract_embeddings_tests.ruff -v` (12/12 pass, includes absolute-deadline and overall-timeout tests), `kujo test-run tests/sdk_contract_tests.ruff -v` (23/23 pass).
+- Tests/validations run: `kujo test-run tests/sdk_contract_embeddings_tests.kujo -v` (12/12 pass, includes absolute-deadline and overall-timeout tests), `kujo test-run tests/sdk_contract_tests.kujo -v` (23/23 pass).
 - README/docs updated: README retry/timeout section now explicitly documents embeddings deadline behavior and `deadline_exceeded` semantics.
 - Follow-up notes: If transport adapters support cancellation tokens in the future, wire them into embeddings for mid-flight cancellation in addition to deadline pre-checks.
 
