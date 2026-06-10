@@ -43,7 +43,7 @@ jobs:
           grep -q './kujo run scripts/stress_harness.kujo' README.md
           grep -q 'export KUJO_BIN="${KUJO_BIN:-/path/to/kujo/target/debug/kujo}"' README.md
           grep -q 'export KUJO_BIN="${KUJO_BIN:-/path/to/kujo/target/debug/kujo}"' docs/PROVIDER_EXTENSION_GUIDE.md
-          if grep -q '/Users/robertdevore/2026/' README.md docs/PROVIDER_EXTENSION_GUIDE.md; then
+          if grep -Eq '/Users/[^[:space:]]+/2026/' README.md docs/PROVIDER_EXTENSION_GUIDE.md; then
             echo "Found machine-specific Kujo runtime paths in docs."
             exit 1
           fi
