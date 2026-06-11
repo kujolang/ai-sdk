@@ -13,17 +13,11 @@ if [[ -z "$real_bin" ]]; then
 	exit 1
 fi
 
-legacy_ext="$(printf '%b' '\162\165\146\146')"
-
 stage_workspace() {
 	local tmp_root
 	tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/kujo-workspace.XXXXXX")"
 
 	rsync -a --exclude='.git' "$script_dir"/ "$tmp_root"/
-
-	while IFS= read -r -d '' source_path; do
-		mv "$source_path" "${source_path%.kujo}.${legacy_ext}"
-	done < <(find "$tmp_root" -type f -name '*.kujo' -print0)
 
 	printf '%s\n' "$tmp_root"
 }
@@ -42,7 +36,7 @@ case "$command_name" in
 		trap 'rm -rf "$tmp_root"' EXIT
 
 		source_file="${source_file#./}"
-		staged_file="${source_file%.kujo}.${legacy_ext}"
+		staged_file="$source_file"
 
 		cd "$tmp_root"
 		exec "$real_bin" "$command_name" "$staged_file" "$@"
