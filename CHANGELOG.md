@@ -14,4 +14,4 @@ The format is based on Keep a Changelog and this project follows semantic versio
 
 ### Added
 
-- Initial Kujo AI SDK release with provider abstractions, normalized contracts, reliability controls, security controls, and CI/release quality gates.
+- Initial AI SDK release with provider abstractions, normalized contracts, reliability controls, security controls, and CI/release quality gates.

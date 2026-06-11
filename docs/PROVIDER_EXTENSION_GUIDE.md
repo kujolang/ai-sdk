@@ -1,6 +1,6 @@
 # Provider Extension Guide
 
-This guide explains how to add a new provider preset and validate capability behavior in the Kujo AI SDK.
+This guide explains how to add a new provider preset and validate capability behavior in the AI SDK.
 
 ## 1) Add a Provider Preset
 

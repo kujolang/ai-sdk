@@ -94,7 +94,7 @@ func run_benchmark_case(case_name, iterations, max_avg_latency_ms, min_throughpu
 	}
 }
 
-print("Kujo AI SDK Benchmark Quality Gate")
+print("AI SDK Benchmark Quality Gate")
 print("----------------------------------")
 
 provider := openai_provider()

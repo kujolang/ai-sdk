@@ -1,7 +1,7 @@
 from src.providers import openai_provider
 from src.ai_sdk import create_client, create_message, chat_completion
 
-print("Kujo AI SDK Production Profile Example")
+print("AI SDK Production Profile Example")
 print("--------------------------------------")
 
 provider := openai_provider()

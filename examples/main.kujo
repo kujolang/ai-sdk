@@ -21,7 +21,7 @@ func print_summary(mode, result) {
 	print(to_json(result))
 }
 
-print("Kujo AI SDK Example App")
+print("AI SDK Example App")
 print("-----------------------")
 
 provider := openai_provider()

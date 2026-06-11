@@ -1,4 +1,4 @@
-# Kujo AI SDK core module.
+# AI SDK core module.
 #
 # This module provides a normalized, provider-agnostic contract for
 # OpenAI-compatible chat APIs with retries and capability checks.

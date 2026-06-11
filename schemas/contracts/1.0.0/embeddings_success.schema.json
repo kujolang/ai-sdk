@@ -1,7 +1,7 @@
 {
 	"$schema": "https://json-schema.org/draft/2020-12/schema",
 	"$id": "https://github.com/kujolang/ai-sdk/schemas/contracts/1.0.0/embeddings_success.schema.json",
-	"title": "Kujo AI SDK Embeddings Success Contract",
+	"title": "AI SDK Embeddings Success Contract",
 	"type": "object",
 	"required": [
 		"ok",

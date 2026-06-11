@@ -1,4 +1,4 @@
-# Kujo AI SDK
+# AI SDK
 
 Provider-gated SDK primitives for building OpenAI-compatible chat and embeddings integrations in Kujo.
 
@@ -248,7 +248,7 @@ Embeddings response includes:
 
 Other HTTP failures (for example `400`, `401`, `404`, `409`) return immediately without retry.
 
-`embeddings(...)` now follows the same retry policy and honors `max_retries`, `retry_budget`, `retry_delay_ms`, `max_retry_delay_ms`, and `retry_jitter_ms`.
+`embeddings(...)` follows the same retry policy and honors `max_retries`, `retry_budget`, `retry_delay_ms`, `max_retry_delay_ms`, and `retry_jitter_ms`.
 
 `embeddings(...)` also honors `overall_timeout_ms` and `deadline_ms`, returning deterministic `deadline_exceeded` errors when request-level deadlines are breached.
 

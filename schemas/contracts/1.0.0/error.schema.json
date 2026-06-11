@@ -1,7 +1,7 @@
 {
 	"$schema": "https://json-schema.org/draft/2020-12/schema",
 	"$id": "https://github.com/kujolang/ai-sdk/schemas/contracts/1.0.0/error.schema.json",
-	"title": "Kujo AI SDK Error Contract",
+	"title": "AI SDK Error Contract",
 	"type": "object",
 	"required": [
 		"ok",

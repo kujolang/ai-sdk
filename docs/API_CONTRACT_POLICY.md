@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document defines how the Kujo AI SDK response contract evolves over time and how deprecations are announced and removed.
+This document defines how the AI SDK response contract evolves over time and how deprecations are announced and removed.
 
 ## Contract Version Field
 

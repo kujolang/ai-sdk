@@ -1,8 +1,8 @@
-# Kujo AI SDK Improvement Checklist and Agent Playbook
+# AI SDK Improvement Checklist and Agent Playbook
 
 ## Purpose
 
-This document is the execution checklist for improving the Kujo AI SDK in a safe, incremental way.
+This document is the execution checklist for improving the AI SDK in a safe, incremental way.
 
 Use it to:
 - Track prioritized work across security, correctness, DX, structure, and features.

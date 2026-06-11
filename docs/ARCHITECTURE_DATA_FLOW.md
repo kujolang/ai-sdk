@@ -1,6 +1,6 @@
-# Kujo AI SDK Architecture and Data Flow
+# AI SDK Architecture and Data Flow
 
-This document explains how requests move through Kujo AI SDK and where reliability, safety, and normalization controls are applied.
+This document explains how requests move through AI SDK and where reliability, safety, and normalization controls are applied.
 
 ## System Components
 

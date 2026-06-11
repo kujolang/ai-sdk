@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This guide shows how to map Kujo AI SDK lifecycle hooks to common observability systems, including OpenTelemetry-style traces and metrics.
+This guide shows how to map AI SDK lifecycle hooks to common observability systems, including OpenTelemetry-style traces and metrics.
 
 ## Available Hook Signals
 

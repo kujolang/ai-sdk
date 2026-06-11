@@ -1,8 +1,8 @@
-# Kujo AI SDK Enterprise Readiness v2 Checklist
+# AI SDK Enterprise Readiness v2 Checklist
 
 ## Intent
 
-This checklist is the next-session execution plan for turning Kujo AI SDK into a high-confidence, enterprise-grade reference implementation for the language ecosystem.
+This checklist is the next-session execution plan for turning AI SDK into a high-confidence, enterprise-grade reference implementation for the language ecosystem.
 
 ## Current Assessment
 

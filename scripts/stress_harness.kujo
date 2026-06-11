@@ -1,7 +1,7 @@
 from src.providers import openai_provider
 from src.ai_sdk import create_client, chat_completion
 
-print("Kujo AI SDK Stress Harness")
+print("AI SDK Stress Harness")
 print("--------------------------")
 
 provider := openai_provider()
