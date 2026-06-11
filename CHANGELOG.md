@@ -6,9 +6,11 @@ The format is based on Keep a Changelog and this project follows semantic versio
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-06-10
+
 ### Added
 
-- Established formal release-discipline artifacts (`LICENSE`, `CHANGELOG.md`) and release/version process documentation.
+- Formalized the stable 1.0.0 Kujo SDK release, with release-discipline artifacts and versioning process documentation aligned to the released package metadata.
 
 ## [0.1.0]
 
