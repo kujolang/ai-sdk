@@ -1,6 +1,10 @@
 from src.providers import openai_provider
 from src.ai_sdk import create_client, create_message, chat_completion
 
+func kv(label, value) {
+	print(label + ":", value)
+}
+
 print("AI SDK Production Profile Example")
 print("--------------------------------------")
 
@@ -33,12 +37,12 @@ production_options := {
 
 result := chat_completion(client, messages, production_options)
 
-print("Result ok:", result["ok"])
-print("Provider:", result["provider"])
-print("Contract version:", result["contract_version"])
-print("Output:", result["output_text"])
+kv("Result ok", result["ok"])
+kv("Provider", result["provider"])
+kv("Contract version", result["contract_version"])
+kv("Output", result["output_text"])
 if has_key(result, "observability") {
-	print("Observability:", result["observability"])
+	kv("Observability", result["observability"])
 } else {
-	print("Observability:", {})
+	kv("Observability", {})
 }

@@ -8,7 +8,7 @@ provider := openai_provider()
 client := create_client(provider, "fixture-key")
 messages := [create_message("user", "Return READY")]
 
-emit_otel_like := func(signal_name, fields) {
+func emit_otel_like(signal_name, fields) {
 	payload := {
 		"signal": signal_name,
 		"library": "ai-sdk",
@@ -18,13 +18,11 @@ emit_otel_like := func(signal_name, fields) {
 	print(to_json(payload))
 }
 
-retry_state := {
-	"calls": 0
-}
+retry_calls := 0
 
 flaky_transport := func(url, request_options) {
-	retry_state["calls"] := retry_state["calls"] + 1
-	if retry_state["calls"] == 1 {
+	retry_calls := retry_calls + 1
+	if retry_calls == 1 {
 		return Err("simulated transient timeout")
 	}
 	return Ok({

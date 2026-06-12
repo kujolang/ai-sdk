@@ -1,17 +1,21 @@
 from src.providers import openai_provider
 from src.ai_sdk import create_client, create_message, chat_completion
 
+func kv(label, value) {
+	print(label + ":", value)
+}
+
 func print_summary(mode, result) {
-	print("Mode:", mode)
-	print("OK:", result["ok"])
-	print("Provider:", result["provider"])
-	print("Status:", result["status_code"])
+	kv("Mode", mode)
+	kv("OK", result["ok"])
+	kv("Provider", result["provider"])
+	kv("Status", result["status_code"])
 
 	if result["ok"] {
-		print("Model:", result["model"])
-		print("Output:", result["output_text"])
-		print("Finish reason:", result["finish_reason"])
-		print("Usage:", result["usage"])
+		kv("Model", result["model"])
+		kv("Output", result["output_text"])
+		kv("Finish reason", result["finish_reason"])
+		kv("Usage", result["usage"])
 	} else {
 		print("Error:", result["error"]["code"], "-", result["error"]["message"])
 	}
