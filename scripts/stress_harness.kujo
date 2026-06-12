@@ -1,6 +1,10 @@
 from src.providers import openai_provider
 from src.ai_sdk import create_client, chat_completion
 
+func kv(label, value) {
+	print(label + ": " + to_string(value))
+}
+
 print("AI SDK Stress Harness")
 print("--------------------------")
 
@@ -29,5 +33,5 @@ for i in range(0, iterations) {
 
 print("")
 print("Completed stress pass")
-print("Success responses: " + to_string(ok_count))
-print("Error responses: " + to_string(error_count))
+kv("Success responses", ok_count)
+kv("Error responses", error_count)

@@ -6,6 +6,14 @@ func fail_benchmark_gate(message) {
 	parse_json("{")
 }
 
+func kv(label, value) {
+	print(label + ": " + to_string(value))
+}
+
+func threshold_kv(label, value, comparator, threshold) {
+	print(label + ": " + to_string(value) + " (threshold " + comparator + " " + to_string(threshold) + ")")
+}
+
 func benchmark_operation_result(case_name, client, messages) {
 	if case_name == "chat_normalization_path" {
 		return chat_completion(client, messages, {
@@ -80,10 +88,10 @@ func run_benchmark_case(case_name, iterations, max_avg_latency_ms, min_throughpu
 	avg_latency_ms := (elapsed_ms * 1.0) / iterations
 	throughput_rps := (iterations * 1000.0) / elapsed_ms
 
-	print("Iterations: " + to_string(iterations))
-	print("Elapsed ms: " + to_string(elapsed_ms))
-	print("Average latency ms: " + to_string(avg_latency_ms) + " (threshold <= " + to_string(max_avg_latency_ms) + ")")
-	print("Throughput rps: " + to_string(throughput_rps) + " (threshold >= " + to_string(min_throughput_rps) + ")")
+	kv("Iterations", iterations)
+	kv("Elapsed ms", elapsed_ms)
+	threshold_kv("Average latency ms", avg_latency_ms, "<=", max_avg_latency_ms)
+	threshold_kv("Throughput rps", throughput_rps, ">=", min_throughput_rps)
 
 	if avg_latency_ms > max_avg_latency_ms {
 		fail_benchmark_gate(case_name + " average latency " + to_string(avg_latency_ms) + " exceeded threshold " + to_string(max_avg_latency_ms))
