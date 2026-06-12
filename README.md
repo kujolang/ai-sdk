@@ -4,6 +4,8 @@ Provider-gated SDK primitives for building OpenAI-compatible chat and embeddings
 
 This project gives you a single, normalized response contract across configured OpenAI-compatible providers (OpenAI, OpenRouter, DeepSeek, and custom endpoints), plus retries, streaming events, and deterministic offline fixtures.
 
+Prioritize copyable examples over tests: examples should model the most token-efficient idioms we want agents to imitate.
+
 ## Why This Exists
 
 - Keep application code provider-agnostic.
@@ -47,6 +49,19 @@ cd ai-sdk
 ```
 
 If `OPENAI_API_KEY` is missing, the example automatically falls back to fixture mode.
+
+Expected fixture-mode output begins with:
+
+```text
+AI SDK Example App
+-----------------------
+No OPENAI_API_KEY found. Running fixture mode so this project works offline.
+
+Mode: fixture
+OK: true
+Provider: openai
+Status: 200
+```
 
 ## Opt-In Live Provider Calls
 
@@ -383,6 +398,14 @@ Local-dev opt-in options:
 - [LICENSE](LICENSE): Project license text (MIT)
 - [kujo.toml](kujo.toml): Package metadata
 - [docs/SDK_ENTERPRISE_READINESS_V2_CHECKLIST.md](docs/SDK_ENTERPRISE_READINESS_V2_CHECKLIST.md): Next-session enterprise hardening backlog
+
+## Agent and Contributor Search Hygiene
+
+- Treat [examples/main.kujo](examples/main.kujo), [examples/telemetry_bridge.kujo](examples/telemetry_bridge.kujo), [examples/production_profile.kujo](examples/production_profile.kujo), and the README snippets as canonical copyable examples.
+- Treat `tests/` as behavior contracts and regression fixtures; keep explicit payloads and expected shapes when they clarify edge cases.
+- Treat `docs/SDK_IMPROVEMENT_CHECKLIST.md` and `docs/SDK_ENTERPRISE_READINESS_V2_CHECKLIST.md` as historical/backlog logs, not canonical usage examples.
+- Exclude generated/bulk paths from the main sweep unless the task explicitly targets them; for this repo, start searches with `rg --glob '!artifacts/**' --glob '!schemas/contracts/**' ...`.
+- Keep example helpers local and boring (`kv`, `section`, `print_lines`) so agents can copy the demonstrated SDK call without importing extra abstractions.
 
 ## Metadata Ownership
 
