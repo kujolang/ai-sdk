@@ -5,6 +5,12 @@ func kv(label, value) {
 	print(label + ":", value)
 }
 
+func print_lines(lines) {
+	for line in lines {
+		print(line)
+	}
+}
+
 func print_summary(mode, result) {
 	kv("Mode", mode)
 	kv("OK", result["ok"])
@@ -20,13 +26,17 @@ func print_summary(mode, result) {
 		print("Error:", result["error"]["code"], "-", result["error"]["message"])
 	}
 
-	print("")
-	print("Normalized JSON:")
-	print(to_json(result))
+	print_lines([
+		"",
+		"Normalized JSON:",
+		to_json(result)
+	])
 }
 
-print("AI SDK Example App")
-print("-----------------------")
+print_lines([
+	"AI SDK Example App",
+	"-----------------------"
+])
 
 provider := openai_provider()
 resolved_api_key := env(provider["api_key_env"])
@@ -40,13 +50,17 @@ messages := [
 ]
 
 if missing_key {
-	print("No OPENAI_API_KEY found. Running fixture mode so this project works offline.")
-	print("")
+	print_lines([
+		"No OPENAI_API_KEY found. Running fixture mode so this project works offline.",
+		""
+	])
 	fixture_result := chat_completion(client, messages, {"offline_fixture": true})
 	print_summary("fixture", fixture_result)
 } else {
-	print("OPENAI_API_KEY detected. Running live OpenAI-compatible request.")
-	print("")
+	print_lines([
+		"OPENAI_API_KEY detected. Running live OpenAI-compatible request.",
+		""
+	])
 	options := {
 		"temperature": 0.2,
 		"max_tokens": 140,
