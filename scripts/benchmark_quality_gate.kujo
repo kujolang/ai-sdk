@@ -10,6 +10,11 @@ func kv(label, value) {
 	print(label + ": " + to_string(value))
 }
 
+func section(title) {
+	print("")
+	print("Case: " + title)
+}
+
 func threshold_kv(label, value, comparator, threshold) {
 	print(label + ": " + to_string(value) + " (threshold " + comparator + " " + to_string(threshold) + ")")
 }
@@ -67,8 +72,7 @@ func benchmark_operation_result(case_name, client, messages) {
 }
 
 func run_benchmark_case(case_name, iterations, max_avg_latency_ms, min_throughput_rps, client, messages) {
-	print("")
-	print("Case: " + case_name)
+	section(case_name)
 	start_ms := current_timestamp()
 
 	i := 0
@@ -109,9 +113,42 @@ provider := openai_provider()
 client := create_client(provider, "fixture-key")
 messages := [create_message("user", "benchmark")]
 
-run_benchmark_case("chat_normalization_path", 300, 25.0, 35.0, client, messages)
-run_benchmark_case("embeddings_normalization_path", 300, 25.0, 30.0, client, messages)
-run_benchmark_case("chat_retry_path", 200, 50.0, 20.0, client, messages)
-run_benchmark_case("embeddings_retry_path", 200, 50.0, 20.0, client, messages)
+benchmark_cases := [
+	{
+		"name": "chat_normalization_path",
+		"iterations": 300,
+		"max_avg_latency_ms": 25.0,
+		"min_throughput_rps": 35.0
+	},
+	{
+		"name": "embeddings_normalization_path",
+		"iterations": 300,
+		"max_avg_latency_ms": 25.0,
+		"min_throughput_rps": 30.0
+	},
+	{
+		"name": "chat_retry_path",
+		"iterations": 200,
+		"max_avg_latency_ms": 50.0,
+		"min_throughput_rps": 20.0
+	},
+	{
+		"name": "embeddings_retry_path",
+		"iterations": 200,
+		"max_avg_latency_ms": 50.0,
+		"min_throughput_rps": 20.0
+	}
+]
+
+for benchmark_case in benchmark_cases {
+	run_benchmark_case(
+		benchmark_case["name"],
+		benchmark_case["iterations"],
+		benchmark_case["max_avg_latency_ms"],
+		benchmark_case["min_throughput_rps"],
+		client,
+		messages
+	)
+}
 
 print("Benchmark quality gate passed.")
