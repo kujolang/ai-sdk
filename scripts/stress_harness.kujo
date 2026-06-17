@@ -5,8 +5,16 @@ func kv(label, value) {
 	print(label + ": " + to_string(value))
 }
 
-print("AI SDK Stress Harness")
-print("--------------------------")
+func print_lines(lines) {
+	for line in lines {
+		print(line)
+	}
+}
+
+print_lines([
+	"AI SDK Stress Harness",
+	"--------------------------"
+])
 
 provider := openai_provider()
 client := create_client(provider, "fixture-key")
@@ -31,7 +39,9 @@ for i in range(0, iterations) {
 	}
 }
 
-print("")
-print("Completed stress pass")
+print_lines([
+	"",
+	"Completed stress pass"
+])
 kv("Success responses", ok_count)
 kv("Error responses", error_count)

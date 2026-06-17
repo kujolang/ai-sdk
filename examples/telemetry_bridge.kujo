@@ -1,8 +1,16 @@
 from src.providers import openai_provider
 from src.ai_sdk import create_client, create_message, chat_completion
 
-print("AI SDK Telemetry Bridge Example")
-print("------------------------------------")
+func print_lines(lines) {
+	for line in lines {
+		print(line)
+	}
+}
+
+print_lines([
+	"AI SDK Telemetry Bridge Example",
+	"------------------------------------"
+])
 
 provider := openai_provider()
 client := create_client(provider, "fixture-key")
@@ -72,6 +80,8 @@ result := chat_completion(client, messages, {
 	"retry_delay_ms": 1
 })
 
-print("")
-print("Final normalized result:")
-print(to_json(result))
+print_lines([
+	"",
+	"Final normalized result:",
+	to_json(result)
+])
