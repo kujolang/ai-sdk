@@ -138,6 +138,55 @@ test "embeddings input budget fails fast before transport" {
 	assert_equal(result["error"]["code"], "request_budget_exceeded")
 }
 
+test "embeddings per-request token governance fails fast before transport" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+	metrics := {"calls": 0}
+
+	transport_should_not_run := func(url, request_options) {
+		metrics["calls"] := metrics["calls"] + 1
+		return Ok({
+			"_status": 200,
+			"_body": "{\"model\":\"text-embedding-3-small\",\"data\":[{\"index\":0,\"embedding\":[0.1,0.2,0.3]}],\"usage\":{\"prompt_tokens\":4,\"total_tokens\":4}}"
+		})
+	}
+
+	result := embeddings(client, "0123456789", {
+		"transport": transport_should_not_run,
+		"max_total_tokens_per_request": 2,
+		"max_retries": 0
+	})
+
+	assert_false(result["ok"])
+	assert_equal(result["error"]["code"], "governance_budget_exceeded")
+	assert_equal(result["error"]["retryable"], false)
+	assert_equal(result["raw"]["budget_type"], "per_request_tokens")
+	assert_equal(metrics["calls"], 0)
+}
+
+test "embeddings rolling token governance rejects over-budget provider usage" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+
+	transport_usage_over_budget := func(url, request_options) {
+		return Ok({
+			"_status": 200,
+			"_body": "{\"model\":\"text-embedding-3-small\",\"data\":[{\"index\":0,\"embedding\":[0.1,0.2,0.3]}],\"usage\":{\"prompt_tokens\":4,\"total_tokens\":4}}"
+		})
+	}
+
+	result := embeddings(client, "second", {
+		"transport": transport_usage_over_budget,
+		"rolling_token_budget_tokens": 3,
+		"max_retries": 0
+	})
+	assert_false(result["ok"])
+	assert_equal(result["error"]["code"], "governance_budget_exceeded")
+	assert_equal(result["raw"]["budget_type"], "rolling_tokens")
+	assert_equal(result["raw"]["used_tokens"], 0)
+	assert_equal(result["raw"]["request_tokens"], 4)
+}
+
 test "embeddings fallback succeeds on retryable primary failure" {
 	primary_provider := openai_provider()
 	primary_provider["transport"] := func(url, request_options) {

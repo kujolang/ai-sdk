@@ -60,3 +60,24 @@ test "provider error normalization redacts uncommon credential aliases" {
 	assert_equal(len(replace(raw_serialized, "jwt-value", "")), len(raw_serialized))
 	assert_equal(len(replace(raw_serialized, "api-value", "")), len(raw_serialized))
 }
+
+test "redaction preserves token count budget fields while hiding credential tokens" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+
+	error_result := standard_error_response(client, "governance_budget_exceeded", "budget", 429, {
+		"planned_tokens": 12,
+		"used_tokens": 4,
+		"request_tokens": 8,
+		"projected_tokens": 12,
+		"rolling_token_budget_tokens": 10,
+		"access_token": "secret-access-token"
+	}, false)
+
+	assert_equal(error_result["raw"]["planned_tokens"], 12)
+	assert_equal(error_result["raw"]["used_tokens"], 4)
+	assert_equal(error_result["raw"]["request_tokens"], 8)
+	assert_equal(error_result["raw"]["projected_tokens"], 12)
+	assert_equal(error_result["raw"]["rolling_token_budget_tokens"], 10)
+	assert_equal(error_result["raw"]["access_token"], "[REDACTED]")
+}

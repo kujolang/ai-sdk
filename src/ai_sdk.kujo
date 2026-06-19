@@ -253,6 +253,9 @@ func build_chat_payload_impl(client, messages, options) {
 }
 
 func is_sensitive_key_name(key_name) {
+	if is_non_secret_token_count_key(key_name) {
+		return false
+	}
 	if key_name == "authorization" || key_name == "Authorization" {
 		return true
 	}
@@ -290,6 +293,22 @@ func is_sensitive_key_name(key_name) {
 		return true
 	}
 	if contains(key_name, "credential") {
+		return true
+	}
+	return false
+}
+
+func is_non_secret_token_count_key(key_name) {
+	if key_name == "input_tokens" || key_name == "output_tokens" || key_name == "total_tokens" {
+		return true
+	}
+	if key_name == "prompt_tokens" || key_name == "completion_tokens" {
+		return true
+	}
+	if key_name == "planned_tokens" || key_name == "used_tokens" || key_name == "request_tokens" || key_name == "projected_tokens" {
+		return true
+	}
+	if key_name == "max_total_tokens_per_request" || key_name == "rolling_token_budget_tokens" {
 		return true
 	}
 	return false
@@ -747,11 +766,15 @@ func governance_error_response(client, message, details) {
 
 func estimate_prompt_tokens(messages) {
 	prompt_characters := message_character_count(messages)
-	if prompt_characters <= 0 {
+	return estimate_tokens_from_character_count(prompt_characters)
+}
+
+func estimate_tokens_from_character_count(character_count) {
+	if character_count <= 0 {
 		return 0
 	}
-	tokens := prompt_characters / 4
-	if prompt_characters % 4 != 0 {
+	tokens := character_count / 4
+	if character_count % 4 != 0 {
 		tokens := tokens + 1
 	}
 	return tokens
@@ -1071,6 +1094,126 @@ func embeddings_input_character_count(input_value) {
 	}
 
 	return len(to_string(input_value))
+}
+
+func planned_embeddings_total_tokens(input_value) {
+	input_characters := embeddings_input_character_count(input_value)
+	return estimate_tokens_from_character_count(input_characters)
+}
+
+func enforce_embeddings_governance_preflight(client, input_value, payload, resolved_options) {
+	max_total_tokens_per_request := dict_get_or(resolved_options, "max_total_tokens_per_request", 0)
+	planned_tokens := planned_embeddings_total_tokens(input_value)
+	if max_total_tokens_per_request > 0 {
+		if planned_tokens > max_total_tokens_per_request {
+			return governance_error_response(
+				client,
+				"Planned embedding token usage exceeds per-request governance budget.",
+				{
+					"budget_type": "per_request_tokens",
+					"planned_tokens": planned_tokens,
+					"max_total_tokens_per_request": max_total_tokens_per_request
+				}
+			)
+		}
+	}
+
+	rolling_token_budget := dict_get_or(resolved_options, "rolling_token_budget_tokens", 0)
+	if rolling_token_budget > 0 {
+		tokens_used := load_governance_token_usage(client, resolved_options)
+		if tokens_used >= rolling_token_budget {
+			return governance_error_response(
+				client,
+				"Rolling token governance budget exceeded.",
+				{
+					"budget_type": "rolling_tokens",
+					"used_tokens": tokens_used,
+					"rolling_token_budget_tokens": rolling_token_budget
+				}
+			)
+		}
+	}
+
+	rolling_cost_budget_cents := dict_get_or(resolved_options, "rolling_cost_budget_cents", 0.0)
+	if rolling_cost_budget_cents > 0 {
+		cost_used := load_governance_cost_usage(client, resolved_options)
+		if cost_used >= rolling_cost_budget_cents {
+			return governance_error_response(
+				client,
+				"Rolling cost governance budget exceeded.",
+				{
+					"budget_type": "rolling_cost",
+					"used_cost_cents": cost_used,
+					"rolling_cost_budget_cents": rolling_cost_budget_cents
+				}
+			)
+		}
+	}
+
+	return null
+}
+
+func apply_embeddings_governance_post_response(client, result, input_value, payload, resolved_options) {
+	if !result["ok"] {
+		return result
+	}
+
+	rolling_token_budget := dict_get_or(resolved_options, "rolling_token_budget_tokens", 0)
+	rolling_cost_budget_cents := dict_get_or(resolved_options, "rolling_cost_budget_cents", 0.0)
+	cost_per_1k_tokens_cents := dict_get_or(resolved_options, "estimated_cost_per_1k_tokens_cents", 0.0)
+	if rolling_token_budget <= 0 && rolling_cost_budget_cents <= 0 {
+		return result
+	}
+
+	usage := dict_get_or(result, "usage", {})
+	request_tokens := dict_get_or(usage, "total_tokens", 0)
+	if request_tokens <= 0 {
+		request_tokens := planned_embeddings_total_tokens(input_value)
+	}
+
+	tokens_used := load_governance_token_usage(client, resolved_options)
+	projected_tokens := tokens_used + request_tokens
+	if rolling_token_budget > 0 {
+		if projected_tokens > rolling_token_budget {
+			return governance_error_response(
+				client,
+				"Rolling token governance budget exceeded.",
+				{
+					"budget_type": "rolling_tokens",
+					"used_tokens": tokens_used,
+					"request_tokens": request_tokens,
+					"projected_tokens": projected_tokens,
+					"rolling_token_budget_tokens": rolling_token_budget
+				}
+			)
+		}
+	}
+
+	cost_used := load_governance_cost_usage(client, resolved_options)
+	request_cost_cents := 0.0
+	if cost_per_1k_tokens_cents > 0 {
+		request_cost_cents := (request_tokens * cost_per_1k_tokens_cents) / 1000.0
+	}
+	projected_cost := cost_used + request_cost_cents
+	if rolling_cost_budget_cents > 0 {
+		if projected_cost > rolling_cost_budget_cents {
+			return governance_error_response(
+				client,
+				"Rolling cost governance budget exceeded.",
+				{
+					"budget_type": "rolling_cost",
+					"used_cost_cents": cost_used,
+					"request_cost_cents": request_cost_cents,
+					"projected_cost_cents": projected_cost,
+					"rolling_cost_budget_cents": rolling_cost_budget_cents
+				}
+			)
+		}
+	}
+
+	persist_governance_token_usage(client, resolved_options, projected_tokens)
+	persist_governance_cost_usage(client, resolved_options, projected_cost)
+	return result
 }
 
 func finalize_embeddings_result(result, start_count, complete_count, retry_count) {
@@ -1411,8 +1554,14 @@ func embeddings_impl(client, input_value, options) {
 		)
 	}
 
+	embedding_governance_error := enforce_embeddings_governance_preflight(client, input_value, payload, resolved_options)
+	if type(embedding_governance_error) == "dict" {
+		return embedding_governance_error
+	}
+
 	if resolved_options["offline_fixture"] {
-		return fixture_embeddings_response_impl(client, payload)
+		fixture_result := fixture_embeddings_response_impl(client, payload)
+		return apply_embeddings_governance_post_response(client, fixture_result, input_value, payload, resolved_options)
 	}
 
 	missing_key := false
@@ -1480,7 +1629,8 @@ func embeddings_impl(client, input_value, options) {
 		start_count := start_count + dict_get_or(attempt_observability, "start_count", 0)
 		complete_count := complete_count + dict_get_or(attempt_observability, "complete_count", 0)
 		if result["ok"] {
-			return finalize_embeddings_result(result, start_count, complete_count, retry_count)
+			governed_result := apply_embeddings_governance_post_response(client, result, input_value, payload, resolved_options)
+			return finalize_embeddings_result(governed_result, start_count, complete_count, retry_count)
 		}
 
 		if !should_retry_result(result) {
@@ -1781,10 +1931,25 @@ func canonical_header_name(header_name) {
 	if header_name == "authorization" {
 		return "Authorization"
 	}
+	if header_name == "AUTHORIZATION" {
+		return "Authorization"
+	}
+	if header_name == "AuthoriZation" {
+		return "Authorization"
+	}
 	if header_name == "Content-Type" {
 		return "Content-Type"
 	}
 	if header_name == "content-type" {
+		return "Content-Type"
+	}
+	if header_name == "CONTENT-TYPE" {
+		return "Content-Type"
+	}
+	if header_name == "Content-type" {
+		return "Content-Type"
+	}
+	if header_name == "content-Type" {
 		return "Content-Type"
 	}
 	return header_name
@@ -2237,7 +2402,33 @@ func finalize_chat_completion_result(client, result, start_count, complete_count
 	return result
 }
 
-func execute_request_once(client, messages, options, resolved_options, payload, budget_error, attempt, deadline_ms, trace_id) {
+func build_chat_request_context(client, payload, options, resolved_options) {
+	headers := {
+		"Authorization": "Bearer " + client["api_key"],
+		"Content-Type": "application/json"
+	}
+	extra_headers := null
+	allow_protected_header_override := false
+	if type(options) == "dict" {
+		extra_headers := dict_get_or(options, "headers", null)
+		allow_protected_header_override := resolved_options["allow_unsafe_header_override"]
+	}
+	headers := merge_headers_with_policy(headers, extra_headers, allow_protected_header_override)
+
+	url := client["provider"]["base_url"] + client["provider"]["chat_path"]
+
+	return {
+		"headers": headers,
+		"url": url,
+		"timeout": resolved_options["timeout"],
+		"connect_timeout": resolved_options["connect_timeout"],
+		"read_timeout": resolved_options["read_timeout"],
+		"body": to_json(payload),
+		"transport": resolve_transport_with_resolved(client, resolved_options)
+	}
+}
+
+func execute_request_once(client, messages, options, resolved_options, payload, budget_error, attempt, deadline_ms, trace_id, request_context) {
 	stream_requested := dict_get_or(payload, "stream", false)
 	started_at := current_timestamp()
 	request_id := trace_id + "-attempt-" + to_string(attempt)
@@ -2256,7 +2447,7 @@ func execute_request_once(client, messages, options, resolved_options, payload, 
 		event := {
 			"attempt": attempt,
 			"provider": client["provider"]["name"],
-			"url": client["provider"]["base_url"] + client["provider"]["chat_path"],
+			"url": request_context["url"],
 			"stream": stream_requested,
 			"started_at": started_at,
 			"trace_id": trace_id,
@@ -2293,31 +2484,15 @@ func execute_request_once(client, messages, options, resolved_options, payload, 
 		}
 	}
 
-	headers := {
-		"Authorization": "Bearer " + client["api_key"],
-		"Content-Type": "application/json"
-	}
-	allow_protected_header_override := false
-	extra_headers := null
-
-	if type(options) == "dict" {
-		extra_headers := dict_get_or(options, "headers", null)
-		allow_protected_header_override := resolved_options["allow_unsafe_header_override"]
-	}
-	headers := merge_headers_with_policy(headers, extra_headers, allow_protected_header_override)
-
-	url := client["provider"]["base_url"] + client["provider"]["chat_path"]
-	timeout := resolved_options["timeout"]
-
 	request_options := {
 		"method": "POST",
-		"timeout": timeout
+		"timeout": request_context["timeout"]
 	}
-	connect_timeout := resolved_options["connect_timeout"]
+	connect_timeout := request_context["connect_timeout"]
 	if connect_timeout > 0 {
 		request_options["connect_timeout"] := connect_timeout
 	}
-	read_timeout := resolved_options["read_timeout"]
+	read_timeout := request_context["read_timeout"]
 	if read_timeout > 0 {
 		request_options["read_timeout"] := read_timeout
 	}
@@ -2329,16 +2504,14 @@ func execute_request_once(client, messages, options, resolved_options, payload, 
 			return finalize_request_result(deadline_result, resolved_options, attempt, started_at, trace_id, request_id)
 		}
 		remaining_timeout := (remaining_ms * 1.0) / 1000.0
-		if remaining_timeout < timeout {
-			timeout := remaining_timeout
-			request_options["timeout"] := timeout
+		if remaining_timeout < request_options["timeout"] {
+			request_options["timeout"] := remaining_timeout
 		}
 	}
-	request_options["_headers"] := headers
-	request_options["_body"] := to_json(payload)
+	request_options["_headers"] := request_context["headers"]
+	request_options["_body"] := request_context["body"]
 
-	transport := resolve_transport_with_resolved(client, resolved_options)
-	http_result := transport(url, request_options)
+	http_result := request_context["transport"](request_context["url"], request_options)
 	match http_result {
 		case Ok(response): {
 			status_code := dict_get_or(response, "_status", dict_get_or(response, "status", 0))
@@ -2681,10 +2854,11 @@ func chat_completion_impl(client, messages, options) {
 	retry_count := 0
 	prepared_payload := build_chat_payload_with_resolved(client, messages, options, resolved_options)
 	prepared_budget_error := enforce_request_budgets(client, messages, prepared_payload, resolved_options)
+	request_context := build_chat_request_context(client, prepared_payload, options, resolved_options)
 
 	attempt := 0
 	while attempt <= max_retries {
-		result := execute_request_once(client, messages, options, resolved_options, prepared_payload, prepared_budget_error, attempt, deadline_ms, trace_id)
+		result := execute_request_once(client, messages, options, resolved_options, prepared_payload, prepared_budget_error, attempt, deadline_ms, trace_id, request_context)
 		attempt_observability := dict_get_or(result, "observability", {})
 		start_count := start_count + dict_get_or(attempt_observability, "start_count", 0)
 		complete_count := complete_count + dict_get_or(attempt_observability, "complete_count", 0)

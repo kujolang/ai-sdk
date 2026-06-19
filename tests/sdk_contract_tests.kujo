@@ -141,6 +141,25 @@ test "header policy protects Authorization and Content-Type by default" {
 	assert_equal(merged["X-Trace"], "trace-123")
 }
 
+test "header policy treats protected names as case-insensitive" {
+	default_headers := {
+		"Authorization": "Bearer sdk-key",
+		"Content-Type": "application/json"
+	}
+	extra_headers := {
+		"AUTHORIZATION": "Bearer attacker",
+		"CONTENT-TYPE": "text/plain",
+		"X-Trace": "trace-456"
+	}
+
+	merged := merge_headers_for_request(default_headers, extra_headers, false)
+	assert_equal(merged["Authorization"], "Bearer sdk-key")
+	assert_equal(merged["Content-Type"], "application/json")
+	assert_equal(merged["X-Trace"], "trace-456")
+	assert_equal(has_key(merged, "AUTHORIZATION"), 0)
+	assert_equal(has_key(merged, "CONTENT-TYPE"), 0)
+}
+
 test "header policy allows protected overrides with explicit opt-in" {
 	default_headers := {
 		"Authorization": "Bearer sdk-key",
@@ -431,4 +450,3 @@ test "streaming returns normalized error when callback throws on error event" {
 	assert_true(type(result["emitted_events"]) == "array")
 	assert_true(len(result["emitted_events"]) > 0)
 }
-
