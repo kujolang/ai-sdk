@@ -15,6 +15,12 @@ Prioritize copyable examples over tests: examples should model the most token-ef
 
 This repository is library-first: import `src/ai_sdk.kujo` and `src/providers.kujo` into Kujo workflows, or use the bundled example app for a runnable entrypoint. It does not expose a separate user-facing CLI.
 
+## Production Readiness Position
+
+AI SDK is a strong enterprise-hardening baseline, not a blanket production certification for every environment.
+
+It is designed to be production-adjacent out of the box: deterministic fixtures, normalized contracts, retries, fallback providers, timeouts, breaker controls, host allowlists, redaction, governance budgets, CI release gates, and schema checks are already present. Before adopting it in a regulated or large-scale deployment, teams should still pin provider/runtime versions, configure live-provider smoke evidence, review outbound host policy, wire observability hooks, set tenant-appropriate token/cost budgets, and run the release gates in their own CI.
+
 ## Highlights
 
 - Provider presets with capability metadata.
@@ -22,8 +28,10 @@ This repository is library-first: import `src/ai_sdk.kujo` and `src/providers.ku
 - Normalized response contract (success + error).
 - Retry/backoff for retryable transport and HTTP failures.
 - Streaming callback API (`delta`, `done`, `error`).
+- Timeout, circuit-breaker, fallback-provider, and governance budget controls.
+- Endpoint allowlist and protected-header policy controls.
 - Deterministic fixture mode for offline development.
-- Contract tests and stress harness included.
+- Contract schemas, release gates, benchmark guardrails, and stress harness included.
 
 ## Requirements
 
@@ -325,13 +333,14 @@ The SDK includes operational safety knobs in request options:
 - `max_in_flight_requests`: returns `concurrency_limit_exceeded` when client in-flight slot budget is saturated.
 - `queue_wait_timeout_ms` + `queue_poll_interval_ms`: optional queue-wait admission control before returning `concurrency_queue_timeout`.
 - `max_total_tokens_per_request`: per-request token governance cap.
-- `rolling_token_budget_tokens` / `rolling_cost_budget_cents` / `estimated_cost_per_1k_tokens_cents`: rolling governance budgets returning `governance_budget_exceeded` on exceedance.
+- `rolling_token_budget_tokens` / `rolling_cost_budget_cents` / `estimated_cost_per_1k_tokens_cents`: rolling governance budgets for chat and embeddings returning `governance_budget_exceeded` on exceedance.
 
 ## Header Override Policy
 
 Request options can include `headers`, but the SDK protects `Authorization` and `Content-Type` by default.
 
 - Default behavior: protected headers cannot be overridden.
+- Protected header matching treats common casing variants (`Authorization`, `authorization`, `AUTHORIZATION`, `Content-Type`, `content-type`, `CONTENT-TYPE`) as the same header.
 - Explicit opt-in: set `allow_unsafe_header_override: true` to allow overriding protected headers.
 
 Custom non-protected headers (for example `X-Trace`) are always merged.
@@ -357,7 +366,7 @@ Network-path responses for both chat and embeddings include an `observability` o
 
 Observability payloads also include correlation and timing metadata (`trace_id`, `request_id`, `started_at`, `finished_at`, `duration_ms`).
 
-Raw success/error payloads are recursively redacted for common and alias secret-bearing keys (for example `api-key`, `clientSecret`, `private_key`, credential/token variants) plus bearer/private-key/token-like value patterns before returning normalized contracts.
+Raw success/error payloads are recursively redacted for common and alias secret-bearing keys (for example `api-key`, `clientSecret`, `private_key`, credential/token variants) plus bearer/private-key/token-like value patterns before returning normalized contracts. Token-count governance fields such as `used_tokens`, `request_tokens`, and `rolling_token_budget_tokens` remain visible because they are operational counters, not credentials.
 
 OpenTelemetry-style mapping guidance and a runnable bridge example are available in [docs/TELEMETRY_INTEROPERABILITY.md](docs/TELEMETRY_INTEROPERABILITY.md).
 
@@ -380,13 +389,27 @@ Local-dev opt-in options:
 
 ## Project Structure
 
+The root directory intentionally contains only package metadata, license/changelog/readme files, the local `./kujo` wrapper, and organized project folders. SDK implementation lives under `src/`; examples, scripts, tests, schemas, docs, and workflows stay in their own directories.
+
 - [src/ai_sdk.kujo](src/ai_sdk.kujo): Core SDK behavior (normalization, retries, streaming, fixture mode)
 - [src/providers.kujo](src/providers.kujo): Provider presets/capabilities
 - [examples/main.kujo](examples/main.kujo): Runnable example
 - [examples/telemetry_bridge.kujo](examples/telemetry_bridge.kujo): Telemetry hook bridge example
 - [examples/production_profile.kujo](examples/production_profile.kujo): Operational defaults example
+- [.github/workflows/ci.yml](.github/workflows/ci.yml): Pinned-runtime CI checks and release-gate execution
+- [.github/workflows/release-validation.yml](.github/workflows/release-validation.yml): Release validation, live-provider evidence, SBOM, and provenance workflow
+- [.github/workflows/compatibility-matrix.yml](.github/workflows/compatibility-matrix.yml): Runtime compatibility checks across pinned runtime refs
 - [scripts/stress_harness.kujo](scripts/stress_harness.kujo): High-iteration fixture stability runner
-- [tests/sdk_contract_tests.kujo](tests/sdk_contract_tests.kujo): Contract tests
+- [scripts/release_quality_gates.sh](scripts/release_quality_gates.sh): Aggregate local/release validation gate
+- [scripts/supply_chain_policy_check.sh](scripts/supply_chain_policy_check.sh): Workflow pinning and supply-chain policy checks
+- [tests/sdk_contract_tests.kujo](tests/sdk_contract_tests.kujo): Core contract tests
+- [tests/sdk_contract_resilience_tests.kujo](tests/sdk_contract_resilience_tests.kujo): Resilience, governance, and fallback contract tests
+- [tests/sdk_contract_embeddings_tests.kujo](tests/sdk_contract_embeddings_tests.kujo): Embeddings contract and governance tests
+- [tests/security_redaction_tests.kujo](tests/security_redaction_tests.kujo): Redaction/security regression tests
+- [tests/reliability_failure_modes_tests.kujo](tests/reliability_failure_modes_tests.kujo): Retry, malformed response, and failure-mode tests
+- [tests/parser_fuzz_smoke_tests.kujo](tests/parser_fuzz_smoke_tests.kujo): Parser fuzz/smoke tests
+- [tests/feature_smoke_tests.kujo](tests/feature_smoke_tests.kujo): End-to-end feature smoke tests
+- [tests/live_provider_smoke_tests.kujo](tests/live_provider_smoke_tests.kujo): Opt-in live-provider smoke test
 - [schemas/contracts/1.0.0](schemas/contracts/1.0.0): Machine-readable response contract schemas for `contract_version` `1.0.0`
 - [docs/PROVIDER_EXTENSION_GUIDE.md](docs/PROVIDER_EXTENSION_GUIDE.md): How to add provider presets and validate capabilities
 - [docs/API_CONTRACT_POLICY.md](docs/API_CONTRACT_POLICY.md): Contract versioning and deprecation policy
@@ -394,16 +417,17 @@ Local-dev opt-in options:
 - [docs/PRODUCTION_PROFILE_AND_RUNBOOK.md](docs/PRODUCTION_PROFILE_AND_RUNBOOK.md): Recommended operational defaults and incident playbooks
 - [docs/ARCHITECTURE_DATA_FLOW.md](docs/ARCHITECTURE_DATA_FLOW.md): Request lifecycle diagram and reliability/safety data-flow narrative
 - [docs/PROVIDER_COMPATIBILITY_MATRIX.md](docs/PROVIDER_COMPATIBILITY_MATRIX.md): Provider capability matrix with caveats for chat/streaming/tool-calls/embeddings
+- [docs/SDK_ENTERPRISE_READINESS_V3_CHECKLIST.md](docs/SDK_ENTERPRISE_READINESS_V3_CHECKLIST.md): Next-session enterprise hardening backlog
 - [CHANGELOG.md](CHANGELOG.md): Versioned release history and notable changes
 - [LICENSE](LICENSE): Project license text (MIT)
 - [kujo.toml](kujo.toml): Package metadata
-- [docs/SDK_ENTERPRISE_READINESS_V2_CHECKLIST.md](docs/SDK_ENTERPRISE_READINESS_V2_CHECKLIST.md): Next-session enterprise hardening backlog
+- [docs/SDK_ENTERPRISE_READINESS_V2_CHECKLIST.md](docs/SDK_ENTERPRISE_READINESS_V2_CHECKLIST.md): Completed enterprise hardening log
 
 ## Agent and Contributor Search Hygiene
 
 - Treat [examples/main.kujo](examples/main.kujo), [examples/telemetry_bridge.kujo](examples/telemetry_bridge.kujo), [examples/production_profile.kujo](examples/production_profile.kujo), and the README snippets as canonical copyable examples.
 - Treat `tests/` as behavior contracts and regression fixtures; keep explicit payloads and expected shapes when they clarify edge cases.
-- Treat `docs/SDK_IMPROVEMENT_CHECKLIST.md` and `docs/SDK_ENTERPRISE_READINESS_V2_CHECKLIST.md` as historical/backlog logs, not canonical usage examples.
+- Treat `docs/SDK_IMPROVEMENT_CHECKLIST.md`, `docs/SDK_ENTERPRISE_READINESS_V2_CHECKLIST.md`, and `docs/SDK_ENTERPRISE_READINESS_V3_CHECKLIST.md` as historical/backlog logs, not canonical usage examples.
 - Exclude generated/bulk paths from the main sweep unless the task explicitly targets them; for this repo, start searches with `rg --glob '!artifacts/**' --glob '!schemas/contracts/**' ...`.
 - Keep example helpers local and boring (`kv`, `section`, `print_lines`) so agents can copy the demonstrated SDK call without importing extra abstractions.
 
@@ -487,6 +511,7 @@ bash scripts/release_quality_gates.sh
 ```
 
 The script enforces minimum test-floor thresholds across contract/security/reliability/parser/feature/live suites and runs a final feature smoke command.
+The aggregate release-gate floor is currently 61 tests.
 The script also runs the benchmark quality gate (`scripts/benchmark_quality_gate.kujo`).
 Benchmark guardrails cover chat and embeddings normalization paths plus retry-delay micro-bench cases with explicit latency and throughput thresholds.
 The gate fails if runtime smoke or benchmark commands emit type-checking warnings.

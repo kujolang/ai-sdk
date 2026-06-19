@@ -54,7 +54,7 @@ This snapshot is historical context from the initial hardening review.
 
 Current state:
 - Tasks in this checklist are complete (see lane statuses and Session Log).
-- Active enterprise follow-up items are tracked in `docs/SDK_ENTERPRISE_READINESS_V2_CHECKLIST.md`.
+- Active enterprise follow-up items are tracked in `docs/SDK_ENTERPRISE_READINESS_V3_CHECKLIST.md`.
 
 ## Prioritized Work Board
 
@@ -1002,4 +1002,4 @@ Template:
 
 Use this prompt pattern:
 
-"Read docs/SDK_ENTERPRISE_READINESS_V2_CHECKLIST.md and README.md. Identify the highest-priority open enterprise-governance item, implement it with tests/docs updates, run `bash scripts/supply_chain_policy_check.sh` and `bash scripts/release_quality_gates.sh`, then append a dated Session Log entry summarizing what changed and what remains."
+"Read docs/SDK_ENTERPRISE_READINESS_V3_CHECKLIST.md and README.md. Identify the highest-priority open enterprise-governance item, implement it with tests/docs updates, run `bash scripts/supply_chain_policy_check.sh` and `bash scripts/release_quality_gates.sh`, then append a dated Session Log entry summarizing what changed and what remains."
