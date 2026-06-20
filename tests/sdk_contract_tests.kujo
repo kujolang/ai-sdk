@@ -1,6 +1,6 @@
 test_setup {
 	from src.providers import openai_provider, deepseek_provider, custom_openai_compatible_provider, custom_openai_compatible_provider_with_options
-	from src.ai_sdk import create_client, create_message, build_chat_payload, chat_completion, chat_completion_stream, embeddings, provider_supports, standard_error_response, normalize_provider_error, parse_json_contract, parse_sse_contract, should_retry_error_result, retry_delay_contract, merge_headers_for_request, normalize_non_stream_success, normalize_stream_success, resolve_options, sdk_default_limits, sdk_contract_version
+	from src.ai_sdk import create_client, create_message, build_chat_payload, chat_completion, chat_completion_stream, embeddings, provider_supports, provider_metadata, standard_error_response, normalize_provider_error, parse_json_contract, parse_sse_contract, should_retry_error_result, retry_delay_contract, merge_headers_for_request, normalize_non_stream_success, normalize_stream_success, resolve_options, sdk_default_limits, sdk_contract_version
 }
 
 test "normalized responses include contract version" {
@@ -173,6 +173,68 @@ test "header policy allows protected overrides with explicit opt-in" {
 	merged := merge_headers_for_request(default_headers, extra_headers, true)
 	assert_equal(merged["Authorization"], "Bearer explicit")
 	assert_equal(merged["Content-Type"], "application/custom+json")
+}
+
+test "header policy drops CR/LF injection in custom header values and names" {
+	default_headers := {
+		"Authorization": "Bearer sdk-key",
+		"Content-Type": "application/json"
+	}
+	extra_headers := {
+		"X-Trace": "trace-clean",
+		"X-Injected": "value\r\nX-Smuggled: evil",
+		"X-Newline-Value": "line1\nline2",
+		"X-Bad\r\nName": "anything"
+	}
+
+	merged := merge_headers_for_request(default_headers, extra_headers, false)
+	assert_equal(merged["X-Trace"], "trace-clean")
+	assert_equal(has_key(merged, "X-Injected"), 0)
+	assert_equal(has_key(merged, "X-Newline-Value"), 0)
+	assert_equal(has_key(merged, "X-Smuggled"), 0)
+	assert_equal(has_key(merged, "X-Bad\r\nName"), 0)
+}
+
+test "header policy drops CR/LF injection even on protected override opt-in" {
+	default_headers := {
+		"Authorization": "Bearer sdk-key",
+		"Content-Type": "application/json"
+	}
+	extra_headers := {
+		"Authorization": "Bearer explicit\r\nX-Smuggled: evil"
+	}
+
+	merged := merge_headers_for_request(default_headers, extra_headers, true)
+	assert_equal(merged["Authorization"], "Bearer sdk-key")
+	assert_equal(has_key(merged, "X-Smuggled"), 0)
+}
+
+test "provider_metadata exposes identity without leaking secrets" {
+	provider := openai_provider()
+	metadata := provider_metadata(provider)
+
+	assert_equal(metadata["name"], "openai")
+	assert_equal(metadata["base_url"], "https://api.openai.com/v1")
+	assert_equal(metadata["host"], "api.openai.com")
+	assert_equal(metadata["chat_path"], "/chat/completions")
+	assert_equal(metadata["embeddings_path"], "/embeddings")
+	assert_equal(metadata["default_model"], "gpt-4.1-mini")
+	assert_equal(metadata["api_key_env"], "OPENAI_API_KEY")
+	assert_true(metadata["capabilities"]["streaming"])
+	assert_equal(metadata["validation_error"], "")
+
+	serialized := to_json(metadata)
+	assert_equal(has_key(metadata, "api_key"), 0)
+	assert_equal(len(replace(serialized, "api_key\"", "")), len(serialized))
+}
+
+test "provider_metadata surfaces validation errors for invalid providers" {
+	invalid_metadata := provider_metadata("not-a-provider")
+	assert_true(len(invalid_metadata["validation_error"]) > 0)
+
+	unsafe_provider := custom_openai_compatible_provider_with_options("http://example.com/v1", "OPENAI_API_KEY", "gpt-4.1-mini", false)
+	unsafe_metadata := provider_metadata(unsafe_provider)
+	assert_true(len(unsafe_metadata["validation_error"]) > 0)
 }
 
 test "custom provider base_url validation accepts https and opted-in localhost http" {

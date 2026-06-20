@@ -943,3 +943,142 @@ test "observability hooks emit retry events" {
 	assert_equal(result["status_code"], 200)
 }
 
+test "structured output request fails fast when provider lacks json_mode" {
+	limited_provider := {
+		"name": "limited",
+		"base_url": "https://limited.example/v1",
+		"chat_path": "/chat/completions",
+		"api_key_env": "LIMITED_API_KEY",
+		"default_model": "limited-model",
+		"capabilities": {
+			"streaming": true,
+			"tool_calls": true,
+			"json_mode": false,
+			"embeddings": true
+		}
+	}
+	client := create_client(limited_provider, "fixture-key")
+	messages := [create_message("user", "structured but unsupported")]
+
+	transport_should_not_run := func(url, request_options) {
+		return Ok({
+			"_status": 200,
+			"_body": "{\"choices\":[{\"message\":{\"content\":\"{}\"},\"finish_reason\":\"stop\"}]}"
+		})
+	}
+
+	result := chat_completion(client, messages, {
+		"transport": transport_should_not_run,
+		"max_retries": 0,
+		"structured_output_schema": {"required": ["answer"]}
+	})
+
+	assert_false(result["ok"])
+	assert_equal(result["error"]["code"], "unsupported_feature")
+}
+
+test "response_format json request fails fast when provider lacks json_mode" {
+	limited_provider := {
+		"name": "limited",
+		"base_url": "https://limited.example/v1",
+		"chat_path": "/chat/completions",
+		"api_key_env": "LIMITED_API_KEY",
+		"default_model": "limited-model",
+		"capabilities": {
+			"streaming": true,
+			"tool_calls": true,
+			"json_mode": false,
+			"embeddings": true
+		}
+	}
+	client := create_client(limited_provider, "fixture-key")
+	messages := [create_message("user", "json response format")]
+
+	result := chat_completion(client, messages, {
+		"transport": func(url, request_options) {
+			return Ok({"_status": 200, "_body": "{}"})
+		},
+		"max_retries": 0,
+		"response_format": {"type": "json_object"}
+	})
+
+	assert_false(result["ok"])
+	assert_equal(result["error"]["code"], "unsupported_feature")
+}
+
+test "response size guardrail rejects oversized provider body" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+	messages := [create_message("user", "oversized")]
+
+	transport_large := func(url, request_options) {
+		return Ok({
+			"_status": 200,
+			"_body": "{\"choices\":[{\"message\":{\"content\":\"this body is far larger than the configured guardrail\"}}]}"
+		})
+	}
+
+	result := chat_completion(client, messages, {
+		"transport": transport_large,
+		"max_retries": 0,
+		"max_raw_response_bytes": 16
+	})
+
+	assert_false(result["ok"])
+	assert_equal(result["error"]["code"], "response_too_large")
+	assert_true(result["raw"]["response_bytes"] > result["raw"]["max_raw_response_bytes"])
+}
+
+test "response size guardrail allows body within budget" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+	messages := [create_message("user", "within budget")]
+
+	transport_ok := func(url, request_options) {
+		return Ok({
+			"_status": 200,
+			"_body": "{\"id\":\"sz-1\",\"choices\":[{\"message\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}"
+		})
+	}
+
+	result := chat_completion(client, messages, {
+		"transport": transport_ok,
+		"max_retries": 0,
+		"max_raw_response_bytes": 100000
+	})
+
+	assert_true(result["ok"])
+	assert_equal(result["output_text"], "ok")
+}
+
+test "endpoint allowlist normalizes host case and trailing dot" {
+	provider := custom_openai_compatible_provider("https://API.OpenAI.Com/v1", "OPENAI_API_KEY", "gpt-4.1-mini")
+	client := create_client(provider, "fixture-key")
+	messages := [create_message("user", "allowlist normalize")]
+
+	transport_ok := func(url, request_options) {
+		return Ok({
+			"_status": 200,
+			"_body": "{\"id\":\"allow-1\",\"choices\":[{\"message\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}"
+		})
+	}
+
+	allowed := chat_completion(client, messages, {
+		"transport": transport_ok,
+		"max_retries": 0,
+		"endpoint_allowlist_enabled": true,
+		"endpoint_allowlist_hosts": ["api.openai.com."]
+	})
+	assert_true(allowed["ok"])
+
+	blocked := chat_completion(client, messages, {
+		"transport": transport_ok,
+		"max_retries": 0,
+		"endpoint_allowlist_enabled": true,
+		"endpoint_allowlist_hosts": ["api.openai.com.evil.test"]
+	})
+	assert_false(blocked["ok"])
+	assert_equal(blocked["error"]["code"], "endpoint_policy_violation")
+	assert_equal(blocked["status_code"], 403)
+}
+

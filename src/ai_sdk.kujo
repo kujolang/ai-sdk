@@ -26,6 +26,42 @@ func provider_supports_impl(provider, capability_key) {
 	return false
 }
 
+func provider_metadata_impl(provider) {
+	if type(provider) != "dict" {
+		return {
+			"name": "",
+			"base_url": "",
+			"host": "",
+			"chat_path": "",
+			"embeddings_path": "",
+			"default_model": "",
+			"api_key_env": "",
+			"capabilities": {},
+			"validation_error": "Invalid provider: expected a provider dict."
+		}
+	}
+
+	base_url := dict_get_or(provider, "base_url", "")
+	capabilities := dict_get_or(provider, "capabilities", {})
+	if type(capabilities) != "dict" {
+		capabilities := {}
+	}
+
+	# Intentionally never surface resolved API keys here; only the env var name
+	# is returned so metadata can be logged safely.
+	return {
+		"name": dict_get_or(provider, "name", ""),
+		"base_url": base_url,
+		"host": provider_host_from_base_url(base_url),
+		"chat_path": dict_get_or(provider, "chat_path", "/chat/completions"),
+		"embeddings_path": dict_get_or(provider, "embeddings_path", "/embeddings"),
+		"default_model": dict_get_or(provider, "default_model", ""),
+		"api_key_env": dict_get_or(provider, "api_key_env", ""),
+		"capabilities": capabilities,
+		"validation_error": dict_get_or(provider, "validation_error", "")
+	}
+}
+
 func create_client_impl(provider, api_key_override) {
 	config_error := ""
 	if type(provider) == "dict" {
@@ -100,7 +136,8 @@ func default_limits() {
 		"estimated_cost_per_1k_tokens_cents": 0.0,
 		"trace_id": "",
 		"endpoint_allowlist_enabled": false,
-		"endpoint_allowlist_hosts": []
+		"endpoint_allowlist_hosts": [],
+		"max_raw_response_bytes": 0
 	}
 }
 
@@ -158,7 +195,8 @@ func resolve_chat_options(client, options) {
 		"on_request_complete": null,
 		"on_retry": null,
 		"endpoint_allowlist_enabled": limits["endpoint_allowlist_enabled"],
-		"endpoint_allowlist_hosts": limits["endpoint_allowlist_hosts"]
+		"endpoint_allowlist_hosts": limits["endpoint_allowlist_hosts"],
+		"max_raw_response_bytes": limits["max_raw_response_bytes"]
 	}
 
 	resolved["model"] := resolve_option_with_default(options, "model", resolved["model"])
@@ -203,6 +241,7 @@ func resolve_chat_options(client, options) {
 	resolved["on_retry"] := resolve_option_with_default(options, "on_retry", resolved["on_retry"])
 	resolved["endpoint_allowlist_enabled"] := resolve_option_with_default(options, "endpoint_allowlist_enabled", resolved["endpoint_allowlist_enabled"])
 	resolved["endpoint_allowlist_hosts"] := resolve_option_with_default(options, "endpoint_allowlist_hosts", resolved["endpoint_allowlist_hosts"])
+	resolved["max_raw_response_bytes"] := resolve_option_with_default(options, "max_raw_response_bytes", resolved["max_raw_response_bytes"])
 
 	return resolved
 }
@@ -378,6 +417,24 @@ func standard_error_response_impl(client, error_code, message, status_code, raw,
 	}
 }
 
+func normalize_endpoint_host(host) {
+	if type(host) != "string" {
+		return ""
+	}
+
+	# Hosts are case-insensitive and may carry a fully-qualified trailing dot;
+	# normalize both so allowlist comparisons are predictable across spellings.
+	normalized := lower(trim(host))
+	while ends_with(normalized, ".") {
+		host_length := len(normalized)
+		if host_length <= 1 {
+			return ""
+		}
+		normalized := substring(normalized, 0, host_length - 1)
+	}
+	return normalized
+}
+
 func provider_host_from_base_url(base_url) {
 	if type(base_url) != "string" {
 		return ""
@@ -398,7 +455,7 @@ func provider_host_from_base_url(base_url) {
 		return ""
 	}
 
-	return trim(host_parts[0])
+	return normalize_endpoint_host(host_parts[0])
 }
 
 func is_endpoint_host_allowlisted(provider_host, allowlist_hosts) {
@@ -413,7 +470,7 @@ func is_endpoint_host_allowlisted(provider_host, allowlist_hosts) {
 	while i < len(allowlist_hosts) {
 		candidate := allowlist_hosts[i]
 		if type(candidate) == "string" {
-			if trim(candidate) == provider_host {
+			if normalize_endpoint_host(candidate) == provider_host {
 				return true
 			}
 		}
@@ -521,6 +578,34 @@ func fixture_response_impl(client) {
 			"model": client["provider"]["default_model"]
 		}
 	}
+}
+
+func response_size_guardrail_error(client, status_code, body_text, resolved_options) {
+	max_raw_response_bytes := dict_get_or(resolved_options, "max_raw_response_bytes", 0)
+	if max_raw_response_bytes <= 0 {
+		return null
+	}
+	if type(body_text) != "string" {
+		return null
+	}
+
+	body_size := len(body_text)
+	if body_size <= max_raw_response_bytes {
+		return null
+	}
+
+	# Avoid retaining or logging the oversized payload; only sizes are surfaced.
+	return standard_error_response_impl(
+		client,
+		"response_too_large",
+		"Provider response exceeded max_raw_response_bytes guardrail.",
+		status_code,
+		{
+			"response_bytes": body_size,
+			"max_raw_response_bytes": max_raw_response_bytes
+		},
+		false
+	)
 }
 
 func parse_json_safe(text) {
@@ -1387,6 +1472,11 @@ func execute_embeddings_request_once(client, payload, resolved_options, attempt,
 			status_code := dict_get_or(response, "_status", dict_get_or(response, "status", 0))
 			body_text := dict_get_or(response, "_body", dict_get_or(response, "body", ""))
 
+			size_guardrail_error := response_size_guardrail_error(client, status_code, body_text, resolved_options)
+			if type(size_guardrail_error) == "dict" {
+				return finalize_request_result(size_guardrail_error, resolved_options, attempt, started_at, trace_id, request_id)
+			}
+
 			if status_code < 200 || status_code > 299 {
 				retryable_http_error := is_retryable_http_status(status_code)
 				result := standard_error_response_impl(
@@ -1966,6 +2056,31 @@ func is_protected_header_name(header_name) {
 	return false
 }
 
+func has_header_control_characters(text) {
+	if type(text) != "string" {
+		return false
+	}
+	if contains(text, "\n") {
+		return true
+	}
+	if contains(text, "\r") {
+		return true
+	}
+	return false
+}
+
+func header_entry_has_injection_risk(header_name, header_value) {
+	if has_header_control_characters(header_name) {
+		return true
+	}
+	if type(header_value) == "string" {
+		if has_header_control_characters(header_value) {
+			return true
+		}
+	}
+	return false
+}
+
 func merge_headers_with_policy(default_headers, extra_headers, allow_protected_override) {
 	headers := {}
 	for key in keys(default_headers) {
@@ -1977,13 +2092,19 @@ func merge_headers_with_policy(default_headers, extra_headers, allow_protected_o
 	}
 
 	for header_name in keys(extra_headers) {
+		header_value := extra_headers[header_name]
+		# Drop CR/LF-bearing header names or values to prevent header
+		# injection / request smuggling through custom headers.
+		if header_entry_has_injection_risk(header_name, header_value) {
+			continue
+		}
 		canonical_name := canonical_header_name(header_name)
 		if is_protected_header_name(header_name) {
 			if allow_protected_override {
-				headers[canonical_name] := extra_headers[header_name]
+				headers[canonical_name] := header_value
 			}
 		} else {
-			headers[canonical_name] := extra_headers[header_name]
+			headers[canonical_name] := header_value
 		}
 	}
 
@@ -2155,6 +2276,27 @@ func enforce_structured_output_contract(client, result, resolved_options) {
 	}
 
 	return result
+}
+
+func request_requires_json_mode(options, resolved_options) {
+	schema := dict_get_or(resolved_options, "structured_output_schema", null)
+	if type(schema) == "dict" {
+		return true
+	}
+
+	if type(options) == "dict" {
+		response_format := dict_get_or(options, "response_format", null)
+		if type(response_format) == "dict" {
+			format_type := dict_get_or(response_format, "type", "")
+			if type(format_type) == "string" {
+				if contains(format_type, "json") {
+					return true
+				}
+			}
+		}
+	}
+
+	return false
 }
 
 func circuit_breaker_enabled(resolved_options) {
@@ -2517,6 +2659,11 @@ func execute_request_once(client, messages, options, resolved_options, payload, 
 			status_code := dict_get_or(response, "_status", dict_get_or(response, "status", 0))
 			body_text := dict_get_or(response, "_body", dict_get_or(response, "body", ""))
 
+			size_guardrail_error := response_size_guardrail_error(client, status_code, body_text, resolved_options)
+			if type(size_guardrail_error) == "dict" {
+				return finalize_request_result(size_guardrail_error, resolved_options, attempt, started_at, trace_id, request_id)
+			}
+
 			if status_code < 200 {
 				retryable_http_error := is_retryable_http_status(status_code)
 				result := standard_error_response_impl(
@@ -2749,6 +2896,19 @@ func chat_completion_impl(client, messages, options) {
 	endpoint_policy_error := enforce_endpoint_allowlist_policy(client, resolved_options)
 	if type(endpoint_policy_error) == "dict" {
 		return endpoint_policy_error
+	}
+
+	if request_requires_json_mode(options, resolved_options) {
+		if !provider_supports_impl(client["provider"], "json_mode") {
+			return standard_error_response_impl(
+				client,
+				"unsupported_feature",
+				"Provider does not support JSON/structured output mode. Remove structured_output_schema/response_format or use a json_mode-capable provider.",
+				0,
+				null,
+				false
+			)
+		}
 	}
 
 	half_open_probe_mode := false
@@ -3090,6 +3250,7 @@ func chat_completion_stream_impl(client, messages, options, on_event) {
 }
 
 export provider_supports := provider_supports_impl
+export provider_metadata := provider_metadata_impl
 export create_client := create_client_impl
 export create_message := create_message_impl
 export build_chat_payload := build_chat_payload_impl
