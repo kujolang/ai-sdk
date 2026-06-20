@@ -15,6 +15,8 @@ Prioritize copyable examples over tests: examples should model the most token-ef
 
 This repository is library-first: import `src/ai_sdk.kujo` and `src/providers.kujo` into Kujo workflows, or use the bundled example app for a runnable entrypoint. It does not expose a separate user-facing CLI.
 
+New here? Start with the [Adoption Guide](docs/ADOPTION_GUIDE.md), which maps every SDK feature to the security, reliability, observability, cost, and CI concern it addresses, then add your own endpoint with the [Build Your First Provider](docs/BUILD_YOUR_FIRST_PROVIDER.md) walkthrough.
+
 ## Production Readiness Position
 
 AI SDK is a strong enterprise-hardening baseline, not a blanket production certification for every environment.
@@ -161,6 +163,7 @@ From [src/ai_sdk.kujo](src/ai_sdk.kujo):
 - `create_message(role, content)`
 - `build_chat_payload(client, messages, options)`
 - `provider_supports(provider, capability_key)`
+- `provider_metadata(provider)`
 - `sdk_default_limits()`
 - `sdk_contract_version()`
 - `chat_completion(client, messages, options)`
@@ -311,6 +314,7 @@ Default limits are centralized in `sdk_default_limits()`:
 - `trace_id`: `""`
 - `endpoint_allowlist_enabled`: `false`
 - `endpoint_allowlist_hosts`: `[]`
+- `max_raw_response_bytes`: `0` (disabled unless set)
 
 ## Operational Safety Controls
 
@@ -326,7 +330,8 @@ The SDK includes operational safety knobs in request options:
 - `circuit_breaker_half_open_max_retries`: retry ceiling used only during half-open probe requests.
 - `state_backend` + `state_namespace`: optional shared state backend hooks for breaker and governance budgets across instances.
 - `endpoint_allowlist_enabled` + `endpoint_allowlist_hosts`: optional outbound host policy mode that blocks requests when provider host is not explicitly allowlisted.
-- `structured_output_schema`: enforce JSON object outputs with required fields (`structured_output_invalid` on violations).
+- `structured_output_schema`: enforce JSON object outputs with required fields (`structured_output_invalid` on violations). When set (or when a JSON `response_format` is requested) against a provider that does not advertise `json_mode`, the request fails fast with `unsupported_feature` before any transport call.
+- `max_raw_response_bytes`: optional guardrail that rejects oversized provider responses with a deterministic, redacted `response_too_large` error before the body is parsed or retained.
 - `fallback_providers`: fail over to alternate provider configs for both chat and embeddings when primary failures remain retryable.
 - `max_prompt_characters`: fails fast with `request_budget_exceeded` when chat prompt or embeddings input content is too large.
 - `max_tools_per_request`: fails fast when tools exceed configured request budget.
@@ -344,6 +349,8 @@ Request options can include `headers`, but the SDK protects `Authorization` and 
 - Explicit opt-in: set `allow_unsafe_header_override: true` to allow overriding protected headers.
 
 Custom non-protected headers (for example `X-Trace`) are always merged.
+
+Any custom header whose name or value contains a carriage return or line feed is dropped during the merge, even when protected-header override is enabled. This prevents header injection and request smuggling through newline-bearing custom headers.
 
 ## Transport Hook
 
@@ -382,6 +389,10 @@ Production defaults and incident procedures are documented in [docs/PRODUCTION_P
 - URLs with embedded credentials (for example `https://user:pass@example.com/...`) are rejected.
 - Query-string and fragment URL forms are rejected; use `https://host[/optional-path]` (or opted-in localhost HTTP) without `?query` or `#fragment` suffixes.
 
+When `endpoint_allowlist_enabled` is on, provider hosts are normalized before comparison: matching is case-insensitive and tolerates a fully-qualified trailing dot, so `https://API.OpenAI.Com/v1` and an allowlist entry of `api.openai.com.` both resolve to `api.openai.com`. Lookalike hosts (for example `api.openai.com.evil.test`) are still rejected.
+
+`provider_metadata(provider)` returns a safe-to-log view of provider identity — `name`, `base_url`, `host`, `chat_path`, `embeddings_path`, `default_model`, `api_key_env`, `capabilities`, and `validation_error` — and never includes a resolved API key.
+
 Local-dev opt-in options:
 
 - Set environment variable `KUJO_AI_SDK_ALLOW_INSECURE_LOCALHOST=1` and call `custom_openai_compatible_provider(...)`.
@@ -411,13 +422,17 @@ The root directory intentionally contains only package metadata, license/changel
 - [tests/feature_smoke_tests.kujo](tests/feature_smoke_tests.kujo): End-to-end feature smoke tests
 - [tests/live_provider_smoke_tests.kujo](tests/live_provider_smoke_tests.kujo): Opt-in live-provider smoke test
 - [schemas/contracts/1.0.0](schemas/contracts/1.0.0): Machine-readable response contract schemas for `contract_version` `1.0.0`
+- [docs/ADOPTION_GUIDE.md](docs/ADOPTION_GUIDE.md): Feature-to-enterprise-concern map, including provider-key and secret hygiene guidance
+- [docs/BUILD_YOUR_FIRST_PROVIDER.md](docs/BUILD_YOUR_FIRST_PROVIDER.md): One-page walkthrough from custom provider to fixture/live validation
+- [docs/RELEASE_CANDIDATE_CHECKLIST.md](docs/RELEASE_CANDIDATE_CHECKLIST.md): Exact local command sequence for validating a release
 - [docs/PROVIDER_EXTENSION_GUIDE.md](docs/PROVIDER_EXTENSION_GUIDE.md): How to add provider presets and validate capabilities
 - [docs/API_CONTRACT_POLICY.md](docs/API_CONTRACT_POLICY.md): Contract versioning and deprecation policy
 - [docs/TELEMETRY_INTEROPERABILITY.md](docs/TELEMETRY_INTEROPERABILITY.md): Hook/event mapping to observability backends
 - [docs/PRODUCTION_PROFILE_AND_RUNBOOK.md](docs/PRODUCTION_PROFILE_AND_RUNBOOK.md): Recommended operational defaults and incident playbooks
 - [docs/ARCHITECTURE_DATA_FLOW.md](docs/ARCHITECTURE_DATA_FLOW.md): Request lifecycle diagram and reliability/safety data-flow narrative
 - [docs/PROVIDER_COMPATIBILITY_MATRIX.md](docs/PROVIDER_COMPATIBILITY_MATRIX.md): Provider capability matrix with caveats for chat/streaming/tool-calls/embeddings
-- [docs/SDK_ENTERPRISE_READINESS_V3_CHECKLIST.md](docs/SDK_ENTERPRISE_READINESS_V3_CHECKLIST.md): Next-session enterprise hardening backlog
+- [docs/SDK_ENTERPRISE_READINESS_V4_CHECKLIST.md](docs/SDK_ENTERPRISE_READINESS_V4_CHECKLIST.md): Next-session enterprise hardening backlog
+- [docs/SDK_ENTERPRISE_READINESS_V3_CHECKLIST.md](docs/SDK_ENTERPRISE_READINESS_V3_CHECKLIST.md): Completed v3 hardening log
 - [CHANGELOG.md](CHANGELOG.md): Versioned release history and notable changes
 - [LICENSE](LICENSE): Project license text (MIT)
 - [kujo.toml](kujo.toml): Package metadata
@@ -427,7 +442,7 @@ The root directory intentionally contains only package metadata, license/changel
 
 - Treat [examples/main.kujo](examples/main.kujo), [examples/telemetry_bridge.kujo](examples/telemetry_bridge.kujo), [examples/production_profile.kujo](examples/production_profile.kujo), and the README snippets as canonical copyable examples.
 - Treat `tests/` as behavior contracts and regression fixtures; keep explicit payloads and expected shapes when they clarify edge cases.
-- Treat `docs/SDK_IMPROVEMENT_CHECKLIST.md`, `docs/SDK_ENTERPRISE_READINESS_V2_CHECKLIST.md`, and `docs/SDK_ENTERPRISE_READINESS_V3_CHECKLIST.md` as historical/backlog logs, not canonical usage examples.
+- Treat `docs/SDK_IMPROVEMENT_CHECKLIST.md`, `docs/SDK_ENTERPRISE_READINESS_V2_CHECKLIST.md`, and `docs/SDK_ENTERPRISE_READINESS_V3_CHECKLIST.md` as historical completed logs, and `docs/SDK_ENTERPRISE_READINESS_V4_CHECKLIST.md` as the active backlog — not canonical usage examples.
 - Exclude generated/bulk paths from the main sweep unless the task explicitly targets them; for this repo, start searches with `rg --glob '!artifacts/**' --glob '!schemas/contracts/**' ...`.
 - Keep example helpers local and boring (`kv`, `section`, `print_lines`) so agents can copy the demonstrated SDK call without importing extra abstractions.
 
@@ -511,7 +526,7 @@ bash scripts/release_quality_gates.sh
 ```
 
 The script enforces minimum test-floor thresholds across contract/security/reliability/parser/feature/live suites and runs a final feature smoke command.
-The aggregate release-gate floor is currently 61 tests.
+The aggregate release-gate floor is currently 95 tests.
 The script also runs the benchmark quality gate (`scripts/benchmark_quality_gate.kujo`).
 Benchmark guardrails cover chat and embeddings normalization paths plus retry-delay micro-bench cases with explicit latency and throughput thresholds.
 The gate fails if runtime smoke or benchmark commands emit type-checking warnings.
@@ -538,7 +553,7 @@ Release validation publishes SBOM and integrity manifest artifacts and attaches 
 
 ## Release and Versioning Process
 
-For each release candidate:
+For each release candidate, follow [docs/RELEASE_CANDIDATE_CHECKLIST.md](docs/RELEASE_CANDIDATE_CHECKLIST.md) for the exact local command sequence. In summary:
 
 1. Update package version fields in `kennel.toml` and `kujo.toml`.
 2. Add release notes under the matching version heading in `CHANGELOG.md`.

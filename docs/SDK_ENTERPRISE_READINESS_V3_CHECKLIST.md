@@ -1,187 +1,97 @@
-# AI SDK Enterprise Readiness v3 Checklist
+# AI SDK Enterprise Readiness v3 Checklist (Completed Log)
 
 ## Intent
 
-This is the next-session worklist for moving AI SDK from a strong enterprise-hardening baseline toward a showcase-grade SDK for Kujo.
+This was the worklist for moving AI SDK from a strong enterprise-hardening
+baseline toward a showcase-grade SDK for Kujo. It is now a completed log; the
+forward backlog lives in
+[SDK_ENTERPRISE_READINESS_V4_CHECKLIST.md](SDK_ENTERPRISE_READINESS_V4_CHECKLIST.md).
 
-## Current Assessment
+## Outcome Summary (2026-06-20)
 
-Status: Strong enterprise baseline, still requiring deployment-specific validation before production use.
-
-What is solid now:
-- Source layout is organized around `src/`, with examples, scripts, tests, schemas, docs, and workflows in dedicated folders.
-- Chat, streaming, and embeddings share normalized contracts, fixture mode, retries, fallbacks, observability hooks, endpoint policy, and governance budget controls.
-- Release gates include contract, resilience, embeddings, security, reliability, parser, feature, live-provider, schema, benchmark, and supply-chain checks.
-- README now presents a clearer production-readiness position and root/project structure map.
-
-Recent hardening added:
-- Case-insensitive protected-header handling for common `Authorization` and `Content-Type` casing variants.
-- Redaction false-positive reduction for non-secret token-count governance fields.
-- Chat request-context precomputation before retry loops.
-- Embeddings governance budget parity for per-request, rolling token, and rolling cost controls.
-- New tests and release-gate floors for those behaviors.
-
-## Agent Operating Rules
-
-For each v3 task:
-1. Pick one unchecked task with no open dependency.
-2. Mark it In Progress before implementation.
-3. Keep changes backward-compatible unless the task explicitly requires a contract bump.
-4. Add tests and README/docs updates in the same change.
-5. Run the relevant suite plus `bash scripts/release_quality_gates.sh`.
-6. Add a dated Session Log entry with commands and outcomes.
-
-## Status Legend
-
-- Todo
-- In Progress
-- Done
-- Blocked
+11 of 12 tasks landed in one session with no regressions. Test count grew from
+90 to 100 across suites; the release-gate floor was raised accordingly.
 
 ## Lane A: Performance and Scale
 
-- [ ] V3-PERF-01 Split `src/ai_sdk.kujo` into focused internal modules if Kujo package ergonomics allow it
-Status: Todo
-Priority: P1
-Dependencies: None
-Why:
-- The core module is now large enough that onboarding and review speed may suffer.
-Acceptance:
-- Public exports remain backward-compatible.
-- README import examples still work.
-- Contract and release gates pass.
+- [ ] V3-PERF-01 Split `src/ai_sdk.kujo` into focused internal modules
+Status: Deferred → carried to V4 (V4-PERF-01)
+Notes: Deferred intentionally. The current Kujo package/import ergonomics make a
+multi-file internal split risky relative to its onboarding benefit; tracked in V4
+pending a clear, backward-compatible module strategy.
 
-- [ ] V3-PERF-02 Add benchmark cases for full injected-transport chat and embeddings request loops
-Status: Todo
-Priority: P1
-Dependencies: None
-Why:
-- Current benchmark guardrails cover fixture normalization and retry-delay paths, but not full request-context and parser hot paths.
-Acceptance:
-- Benchmark script includes successful injected transport for chat and embeddings.
-- Thresholds are strict enough to catch regressions while stable locally and in CI.
+- [x] V3-PERF-02 Add benchmark cases for full request/parse hot paths
+Status: Done (adapted)
+Notes: The default VM runtime cannot drive injected-transport closures (only the
+interpreter can), and the release gate runs the benchmark in VM mode. The
+equivalent hot paths are now covered by `chat_parse_normalization_path` and
+`stream_parse_normalization_path` benchmark cases that drive the exported parse +
+normalization functions with explicit latency/throughput thresholds. The
+VM-vs-interpreter transport-closure gap is tracked in V4 (V4-PERF-02).
 
-- [ ] V3-PERF-03 Add high-cardinality streaming stress coverage
-Status: Todo
-Priority: P2
-Dependencies: None
-Why:
-- Streaming normalization and callback emission should be validated under many small delta chunks.
-Acceptance:
-- Stress or reliability suite includes a large chunk-count stream case.
-- Runtime remains deterministic and avoids excessive allocations.
+- [x] V3-PERF-03 Add high-cardinality streaming stress coverage
+Status: Done
+Notes: `tests/reliability_failure_modes_tests.kujo` now streams 250 small SSE
+frames through `chat_completion_stream` and validates deterministic delta/done
+emission via the `emitted_events` surface.
 
 ## Lane B: Security Hardening
 
-- [ ] V3-SEC-01 Add header injection rejection for CR/LF in custom header names and values
-Status: Todo
-Priority: P0
-Dependencies: None
-Why:
-- Custom headers should not allow newline-bearing names or values to reach transport adapters.
-Acceptance:
-- Header merge policy drops or rejects CR/LF-bearing headers deterministically.
-- Tests cover malicious header names and values.
-- README documents the policy.
+- [x] V3-SEC-01 Reject CR/LF in custom header names and values
+Status: Done
+Notes: `merge_headers_with_policy` drops any header whose name or value contains
+CR/LF, even under protected-override opt-in. Covered by two new contract tests.
 
-- [ ] V3-SEC-02 Expand endpoint host parsing coverage for ports, trailing dots, and mixed-case schemes/hosts
-Status: Todo
-Priority: P1
-Dependencies: None
-Why:
-- Endpoint allowlists should be predictable across common URL spellings.
-Acceptance:
-- Tests cover allowed host with explicit port and blocked lookalike hosts.
-- Behavior remains strict and documented.
+- [x] V3-SEC-02 Expand endpoint host parsing coverage
+Status: Done
+Notes: Hosts are normalized (case-insensitive, trailing-dot tolerant) before
+allowlist comparison; lookalike hosts still rejected. Covered by a new resilience
+test.
 
-- [ ] V3-SEC-03 Add provider key source guidance and secret hygiene examples
-Status: Todo
-Priority: P2
-Dependencies: None
-Why:
-- Enterprise adopters need clear patterns for environment variables, secret stores, and redacted logs.
-Acceptance:
-- README or runbook includes provider-key handling guidance.
-- Examples do not print provider keys or sensitive headers.
+- [x] V3-SEC-03 Provider key source guidance and secret hygiene
+Status: Done
+Notes: Documented in `docs/ADOPTION_GUIDE.md`; `provider_metadata(...)` returns
+the env var name, never a resolved key, and examples never print secrets.
 
 ## Lane C: Functional Completeness
 
-- [ ] V3-FUNC-01 Add provider capability validation for requested JSON/structured output modes
-Status: Todo
-Priority: P1
-Dependencies: None
-Why:
-- `structured_output_schema` should fail clearly when a provider lacks JSON-mode support.
-Acceptance:
-- Request path checks provider capability before transport when structured output is requested.
-- Tests cover supported and unsupported providers.
+- [x] V3-FUNC-01 Provider capability validation for JSON/structured output
+Status: Done
+Notes: Requests using `structured_output_schema` or a JSON `response_format`
+against a provider lacking `json_mode` fail fast with `unsupported_feature`
+before transport. Covered by two new resilience tests.
 
-- [ ] V3-FUNC-02 Add normalized model/provider metadata helper
-Status: Todo
-Priority: P2
-Dependencies: None
-Why:
-- Users need a simple way to inspect provider identity, base URL, default model, and capabilities.
-Acceptance:
-- New exported helper is documented and tested.
-- No secrets are included in returned metadata.
+- [x] V3-FUNC-02 Normalized model/provider metadata helper
+Status: Done
+Notes: Exported `provider_metadata(provider)` returns identity/capabilities with
+no secrets. Covered by two new contract tests.
 
-- [ ] V3-FUNC-03 Add optional response-size guardrails for raw payloads
-Status: Todo
-Priority: P2
-Dependencies: None
-Why:
-- Large provider responses can create memory and logging pressure.
-Acceptance:
-- Option controls max retained raw body size before normalization.
-- Error shape is deterministic and redacted.
+- [x] V3-FUNC-03 Optional response-size guardrails for raw payloads
+Status: Done
+Notes: `max_raw_response_bytes` returns a deterministic, redacted
+`response_too_large` error before parsing oversized chat/embeddings bodies.
+Covered by two new resilience tests. Streaming-chunk size accounting is tracked
+in V4 (V4-FUNC-01).
 
 ## Lane D: Documentation and Presentation
 
-- [ ] V3-DOC-01 Add an adoption guide that maps SDK features to enterprise concerns
-Status: Todo
-Priority: P0
-Dependencies: None
-Why:
-- This project is meant to showcase Kujo; evaluators should quickly see how language features produce real operational value.
-Acceptance:
-- New doc explains security, reliability, observability, cost controls, fixtures, and CI gates.
-- README links it in the first half of the file.
+- [x] V3-DOC-01 Adoption guide mapping features to enterprise concerns
+Status: Done — `docs/ADOPTION_GUIDE.md`, linked in the README's first half.
 
-- [ ] V3-DOC-02 Add a one-page "build your first provider" walkthrough
-Status: Todo
-Priority: P1
-Dependencies: None
-Why:
-- Provider extensibility is a major universal-usefulness story.
-Acceptance:
-- Walkthrough starts from `custom_openai_compatible_provider(...)`.
-- Includes validation, fixture test, and live smoke guidance.
+- [x] V3-DOC-02 One-page "build your first provider" walkthrough
+Status: Done — `docs/BUILD_YOUR_FIRST_PROVIDER.md`.
 
-- [ ] V3-DOC-03 Add release-candidate checklist with exact local command sequence
-Status: Todo
-Priority: P1
-Dependencies: None
-Why:
-- Release readiness should be easy for contributors to execute without reading multiple files.
-Acceptance:
-- Checklist includes supply-chain check, release gate, schema check, examples, and live smoke policy.
-- README links the checklist from release process.
-
-## Recommended Execution Order
-
-1. V3-SEC-01
-2. V3-DOC-01
-3. V3-PERF-02
-4. V3-FUNC-01
-5. V3-DOC-03
-6. Remaining tasks by priority
+- [x] V3-DOC-03 Release-candidate checklist with exact local command sequence
+Status: Done — `docs/RELEASE_CANDIDATE_CHECKLIST.md`, linked from the release
+process section.
 
 ## Session Log
 
-- Date: 2026-06-19
-- Task ID: V3-BOOTSTRAP
-- Summary: Created v3 readiness checklist after hardening review. Captured remaining performance, security, functionality, and presentation tasks for the next session.
-- Tests/validations run: Pending in current session; see final session report.
-- README/docs updated: README points to this v3 checklist and clarifies production-readiness position.
-- Follow-up notes: Start next session with V3-SEC-01 unless a higher-priority user request supersedes it.
+- Date: 2026-06-20
+- Task ID: V3-COMPLETE
+- Summary: Implemented V3-SEC-01/02/03, V3-FUNC-01/02/03, V3-DOC-01/02/03, and
+  V3-PERF-02 (adapted)/03. Deferred V3-PERF-01. Added 10 tests (90 → 100), raised
+  release-gate floors, and added three adoption/extension/release docs.
+- Tests/validations run: All eight suites pass; `bash scripts/release_quality_gates.sh`
+  passes with aggregate test count 100; benchmark quality gate passes in VM mode.
+- Follow-up: See `docs/SDK_ENTERPRISE_READINESS_V4_CHECKLIST.md`.

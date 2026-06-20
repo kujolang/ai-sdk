@@ -46,13 +46,13 @@ run_test_suite_with_floor() {
 }
 
 TOTAL_TEST_COUNT=0
-MIN_TOTAL_TEST_FLOOR=61
+MIN_TOTAL_TEST_FLOOR=95
 
-run_test_suite_with_floor tests/sdk_contract_tests.kujo 24
-run_test_suite_with_floor tests/sdk_contract_resilience_tests.kujo 34
+run_test_suite_with_floor tests/sdk_contract_tests.kujo 28
+run_test_suite_with_floor tests/sdk_contract_resilience_tests.kujo 39
 run_test_suite_with_floor tests/sdk_contract_embeddings_tests.kujo 14
 run_test_suite_with_floor tests/security_redaction_tests.kujo 3
-run_test_suite_with_floor tests/reliability_failure_modes_tests.kujo 6
+run_test_suite_with_floor tests/reliability_failure_modes_tests.kujo 9
 run_test_suite_with_floor tests/parser_fuzz_smoke_tests.kujo 3
 run_test_suite_with_floor tests/feature_smoke_tests.kujo 3
 run_test_suite_with_floor tests/live_provider_smoke_tests.kujo 1
