@@ -1,6 +1,6 @@
 test_setup {
 	from src.providers import openai_provider
-	from src.ai_sdk import create_client, create_message, chat_completion, parse_sse_contract
+	from src.ai_sdk import create_client, create_message, chat_completion, chat_completion_stream, parse_sse_contract
 }
 
 test "timeout transport error is normalized as retryable network_error" {
@@ -205,4 +205,68 @@ test "chunked malformed stream burst keeps valid delta events" {
 	assert_true(len(result["output_text"]) > 0)
 	assert_equal(result["finish_reason"], "stop")
 	assert_true(len(result["raw"]["stream_events"]) >= 1)
+}
+
+test "high-cardinality streaming remains deterministic under many small deltas" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+	messages := [create_message("user", "high cardinality stream")]
+
+	delta_count := 250
+	chunks := []
+	i := 0
+	while i < delta_count {
+		finish_reason := ""
+		if i == delta_count - 1 {
+			finish_reason := "stop"
+		}
+		frame := "data: {\"id\":\"evt-" + to_string(i) + "\",\"choices\":[{\"delta\":{\"content\":\"x\"},\"finish_reason\":\"" + finish_reason + "\"}]}\n\n"
+		chunks := push(chunks, frame)
+		i := i + 1
+	}
+	chunks := push(chunks, "data: [DONE]\n\n")
+
+	high_cardinality_transport := func(url, request_options) {
+		return Ok({
+			"_status": 200,
+			"_body": "",
+			"_stream_chunks": chunks
+		})
+	}
+
+	handler := func(event) {
+		return null
+	}
+
+	result := chat_completion_stream(client, messages, {
+		"transport": high_cardinality_transport,
+		"max_retries": 0
+	}, handler)
+
+	assert_true(result["ok"])
+	assert_equal(result["finish_reason"], "stop")
+	assert_equal(len(result["output_text"]), delta_count)
+	assert_equal(len(result["raw"]["stream_events"]), delta_count)
+
+	# emitted_events is the documented validation surface: one event per delta
+	# plus a terminal done event, in order.
+	emitted_events := result["emitted_events"]
+	assert_equal(len(emitted_events), delta_count + 1)
+
+	delta_seen := 0
+	done_seen := 0
+	j := 0
+	while j < len(emitted_events) {
+		event_type := emitted_events[j]["type"]
+		if event_type == "delta" {
+			delta_seen := delta_seen + 1
+		}
+		if event_type == "done" {
+			done_seen := done_seen + 1
+		}
+		j := j + 1
+	}
+	assert_equal(delta_seen, delta_count)
+	assert_equal(done_seen, 1)
+	assert_true(emitted_events[len(emitted_events) - 1]["done"])
 }

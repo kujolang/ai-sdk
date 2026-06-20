@@ -1,5 +1,5 @@
 from src.providers import openai_provider
-from src.ai_sdk import create_client, create_message, chat_completion, embeddings, retry_delay_contract
+from src.ai_sdk import create_client, create_message, chat_completion, embeddings, retry_delay_contract, parse_json_contract, parse_sse_contract, normalize_non_stream_success, normalize_stream_success
 
 func fail_benchmark_gate(message) {
 	print("Benchmark gate failure: " + message)
@@ -32,6 +32,27 @@ func benchmark_operation_result(case_name, client, messages) {
 			"offline_fixture": true,
 			"max_retries": 0
 		})
+	}
+
+	if case_name == "chat_parse_normalization_path" {
+		body := "{\"id\":\"bench-chat\",\"model\":\"gpt-4.1-mini\",\"choices\":[{\"message\":{\"content\":\"benchmark response body exercising the full parse and normalization hot path\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":8,\"total_tokens\":20}}"
+		parsed := parse_json_contract(body)
+		if !parsed["ok"] {
+			fail_benchmark_gate("chat_parse_normalization_path failed to parse benchmark body")
+		}
+		return normalize_non_stream_success(client, 200, parsed["data"], "gpt-4.1-mini")
+	}
+
+	if case_name == "stream_parse_normalization_path" {
+		body := "data: {\"id\":\"evt-1\",\"model\":\"gpt-4.1-mini\",\"choices\":[{\"delta\":{\"content\":\"Hello \"},\"finish_reason\":\"\"}]}\n\n"
+		body := body + "data: {\"id\":\"evt-2\",\"choices\":[{\"delta\":{\"content\":\"world\"},\"finish_reason\":\"\"}]}\n\n"
+		body := body + "data: {\"id\":\"evt-3\",\"choices\":[{\"delta\":{\"content\":\"!\"},\"finish_reason\":\"stop\"}]}\n\n"
+		body := body + "data: [DONE]\n\n"
+		stream_events := parse_sse_contract(body)
+		if len(stream_events) == 0 {
+			fail_benchmark_gate("stream_parse_normalization_path produced no events")
+		}
+		return normalize_stream_success(client, 200, stream_events, "gpt-4.1-mini")
 	}
 
 	if case_name == "chat_retry_path" {
@@ -122,6 +143,18 @@ benchmark_cases := [
 	},
 	{
 		"name": "embeddings_normalization_path",
+		"iterations": 300,
+		"max_avg_latency_ms": 25.0,
+		"min_throughput_rps": 30.0
+	},
+	{
+		"name": "chat_parse_normalization_path",
+		"iterations": 300,
+		"max_avg_latency_ms": 25.0,
+		"min_throughput_rps": 30.0
+	},
+	{
+		"name": "stream_parse_normalization_path",
 		"iterations": 300,
 		"max_avg_latency_ms": 25.0,
 		"min_throughput_rps": 30.0
