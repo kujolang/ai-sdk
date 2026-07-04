@@ -1,5 +1,9 @@
 # AI SDK
 
+[![Version](https://img.shields.io/badge/version-1.0.0-black)](https://github.com/kujolang/ai-sdk)
+[![License](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
+[![built with Kujo](https://img.shields.io/badge/built%20with-Kujo-white.svg)](https://github.com/kujolang/kujo)
+
 Provider-gated SDK primitives for building OpenAI-compatible chat and embeddings integrations in Kujo.
 
 This project gives you a single, normalized response contract across configured OpenAI-compatible providers (OpenAI, OpenRouter, DeepSeek, and custom endpoints), plus retries, streaming events, and deterministic offline fixtures.
