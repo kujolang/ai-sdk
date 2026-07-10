@@ -1,6 +1,49 @@
 test_setup {
-	from src.providers import openai_provider, deepseek_provider, custom_openai_compatible_provider, custom_openai_compatible_provider_with_options
-	from src.ai_sdk import create_client, create_message, build_chat_payload, chat_completion, chat_completion_stream, embeddings, provider_supports, provider_metadata, standard_error_response, normalize_provider_error, parse_json_contract, parse_sse_contract, should_retry_error_result, retry_delay_contract, merge_headers_for_request, normalize_non_stream_success, normalize_stream_success, resolve_options, sdk_default_limits, sdk_contract_version
+	from src.providers import openai_provider, openrouter_provider, deepseek_provider, custom_openai_compatible_provider, custom_openai_compatible_provider_with_options
+	from src.ai_sdk import create_client, create_message, build_chat_payload, chat_completion, chat_completion_stream, embeddings, provider_supports, provider_metadata, resolve_model_preference, standard_error_response, normalize_provider_error, parse_json_contract, parse_sse_contract, should_retry_error_result, retry_delay_contract, merge_headers_for_request, normalize_non_stream_success, normalize_stream_success, resolve_options, sdk_default_limits, sdk_contract_version
+}
+
+test "model preference resolver is provider-owned and deterministic" {
+	preference := {
+		"class": "adversarial_reasoning",
+		"preferred": ["claude-opus", "gpt-5.5", "deepseek-pro"],
+		"fallback": "local-reasoning"
+	}
+
+	openai_result := resolve_model_preference(openai_provider(), preference)
+	assert_true(openai_result["ok"])
+	assert_equal(openai_result["provider"], "openai")
+	assert_equal(openai_result["model"], "gpt-4.1-mini")
+	assert_equal(openai_result["source"], "provider_class")
+
+	openrouter_result := resolve_model_preference(openrouter_provider(), preference)
+	assert_equal(openrouter_result["model"], "openai/gpt-4.1-mini")
+
+	deepseek_result := resolve_model_preference(deepseek_provider(), preference)
+	assert_equal(deepseek_result["model"], "deepseek-chat")
+}
+
+test "model preference resolver honors explicit resolved ids and provider overrides" {
+	provider := openai_provider()
+	resolved := resolve_model_preference(provider, {
+		"class": "frontier_reasoning",
+		"resolved_model_id": "approved-deployment-id"
+	})
+	assert_equal(resolved["model"], "approved-deployment-id")
+	assert_equal(resolved["source"], "resolved_model_id")
+
+	overridden := resolve_model_preference(provider, {
+		"class": "frontier_reasoning",
+		"provider_overrides": {"openai": "tenant-approved-model"}
+	})
+	assert_equal(overridden["model"], "tenant-approved-model")
+	assert_equal(overridden["source"], "provider_override")
+}
+
+test "model preference resolver rejects invalid provider shapes" {
+	result := resolve_model_preference("invalid", {"class": "frontier_reasoning"})
+	assert_false(result["ok"])
+	assert_equal(result["error"]["code"], "invalid_model_preference")
 }
 
 test "normalized responses include contract version" {

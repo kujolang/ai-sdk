@@ -60,6 +60,7 @@ The following are allowed in MINOR/PATCH releases:
 - new provider capabilities
 - new endpoints that do not alter existing endpoint contracts
 - stricter validation that only affects clearly invalid inputs
+- additive provider metadata and standalone resolver contracts such as model-preference resolution, provided existing response fields and semantics remain unchanged
 
 ## Governance Checklist
 

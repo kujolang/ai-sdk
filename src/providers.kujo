@@ -86,6 +86,14 @@ func custom_openai_compatible_provider_with_options_impl(base_url, api_key_env, 
 		"chat_path": "/chat/completions",
 		"api_key_env": api_key_env,
 		"default_model": default_model,
+		"supported_models": [default_model],
+		"model_preferences": {
+			"frontier_reasoning": default_model,
+			"adversarial_reasoning": default_model,
+			"implementation_reasoning": default_model,
+			"systems_reasoning": default_model,
+			"strategic_reasoning": default_model
+		},
 		"capabilities": {
 			"streaming": true,
 			"tool_calls": true,
@@ -110,6 +118,14 @@ export openai_provider := func() {
 		"chat_path": "/chat/completions",
 		"api_key_env": "OPENAI_API_KEY",
 		"default_model": "gpt-4.1-mini",
+		"supported_models": ["gpt-4.1-mini"],
+		"model_preferences": {
+			"frontier_reasoning": "gpt-4.1-mini",
+			"adversarial_reasoning": "gpt-4.1-mini",
+			"implementation_reasoning": "gpt-4.1-mini",
+			"systems_reasoning": "gpt-4.1-mini",
+			"strategic_reasoning": "gpt-4.1-mini"
+		},
 		"capabilities": {
 			"streaming": true,
 			"tool_calls": true,
@@ -126,6 +142,14 @@ export openrouter_provider := func() {
 		"chat_path": "/chat/completions",
 		"api_key_env": "OPENROUTER_API_KEY",
 		"default_model": "openai/gpt-4.1-mini",
+		"supported_models": ["openai/gpt-4.1-mini"],
+		"model_preferences": {
+			"frontier_reasoning": "openai/gpt-4.1-mini",
+			"adversarial_reasoning": "openai/gpt-4.1-mini",
+			"implementation_reasoning": "openai/gpt-4.1-mini",
+			"systems_reasoning": "openai/gpt-4.1-mini",
+			"strategic_reasoning": "openai/gpt-4.1-mini"
+		},
 		"capabilities": {
 			"streaming": true,
 			"tool_calls": true,
@@ -142,6 +166,14 @@ export deepseek_provider := func() {
 		"chat_path": "/chat/completions",
 		"api_key_env": "DEEPSEEK_API_KEY",
 		"default_model": "deepseek-chat",
+		"supported_models": ["deepseek-chat"],
+		"model_preferences": {
+			"frontier_reasoning": "deepseek-chat",
+			"adversarial_reasoning": "deepseek-chat",
+			"implementation_reasoning": "deepseek-chat",
+			"systems_reasoning": "deepseek-chat",
+			"strategic_reasoning": "deepseek-chat"
+		},
 		"capabilities": {
 			"streaming": true,
 			"tool_calls": true,

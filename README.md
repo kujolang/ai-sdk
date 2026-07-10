@@ -168,6 +168,7 @@ From [src/ai_sdk.kujo](src/ai_sdk.kujo):
 - `build_chat_payload(client, messages, options)`
 - `provider_supports(provider, capability_key)`
 - `provider_metadata(provider)`
+- `resolve_model_preference(provider, preference)`
 - `sdk_default_limits()`
 - `sdk_contract_version()`
 - `chat_completion(client, messages, options)`
@@ -181,6 +182,23 @@ From [src/providers.kujo](src/providers.kujo):
 - `deepseek_provider()`
 - `custom_openai_compatible_provider(base_url, api_key_env, default_model)`
 - `custom_openai_compatible_provider_with_options(base_url, api_key_env, default_model, allow_insecure_localhost)`
+
+## Model Preference Resolution
+
+Applications can pass provider-neutral intent to `resolve_model_preference(...)` instead of choosing a provider model themselves:
+
+```kujo
+from src.providers import openai_provider
+from src.ai_sdk import resolve_model_preference
+
+resolution := resolve_model_preference(openai_provider(), {
+	"class": "frontier_reasoning",
+	"preferred": ["team-frontier-model"],
+	"fallback": "local-reasoning"
+})
+```
+
+Resolution precedence is explicit `resolved_model_id`, a `provider_overrides` entry, the provider's class mapping, a compatible preferred/fallback model, then the provider default. The result records `provider`, `model`, `preference_class`, and `source` so callers can persist routing evidence without secrets. Provider presets own the class-to-model mapping; downstream orchestrators should not duplicate it. See [examples/model_preferences.kujo](examples/model_preferences.kujo).
 
 ## Minimal Usage
 
@@ -411,6 +429,7 @@ The root directory intentionally contains only package metadata, license/changel
 - [examples/main.kujo](examples/main.kujo): Runnable example
 - [examples/telemetry_bridge.kujo](examples/telemetry_bridge.kujo): Telemetry hook bridge example
 - [examples/production_profile.kujo](examples/production_profile.kujo): Operational defaults example
+- [examples/model_preferences.kujo](examples/model_preferences.kujo): Provider-owned model preference resolution example
 - [.github/workflows/ci.yml](.github/workflows/ci.yml): Pinned-runtime CI checks and release-gate execution
 - [.github/workflows/release-validation.yml](.github/workflows/release-validation.yml): Release validation, live-provider evidence, SBOM, and provenance workflow
 - [.github/workflows/compatibility-matrix.yml](.github/workflows/compatibility-matrix.yml): Runtime compatibility checks across pinned runtime refs

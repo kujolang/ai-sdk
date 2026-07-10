@@ -8,6 +8,7 @@ The format is based on Keep a Changelog and this project follows semantic versio
 
 ### Added
 
+- Provider-owned `resolve_model_preference(provider, preference)` routing with explicit resolution provenance, provider class mappings, overrides, and deterministic fallback behavior.
 - `provider_metadata(provider)` helper returning safe-to-log provider identity and capabilities (never a resolved API key).
 - `max_raw_response_bytes` option that rejects oversized provider responses with a deterministic, redacted `response_too_large` error before parsing.
 - JSON/structured-output capability validation: requests using `structured_output_schema` or a JSON `response_format` against a provider without `json_mode` now fail fast with `unsupported_feature` before transport.

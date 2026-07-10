@@ -37,6 +37,7 @@ func provider_metadata_impl(provider) {
 			"default_model": "",
 			"api_key_env": "",
 			"capabilities": {},
+			"model_preferences": {},
 			"validation_error": "Invalid provider: expected a provider dict."
 		}
 	}
@@ -58,8 +59,130 @@ func provider_metadata_impl(provider) {
 		"default_model": dict_get_or(provider, "default_model", ""),
 		"api_key_env": dict_get_or(provider, "api_key_env", ""),
 		"capabilities": capabilities,
+		"model_preferences": dict_get_or(provider, "model_preferences", {}),
 		"validation_error": dict_get_or(provider, "validation_error", "")
 	}
+}
+
+func string_array_contains(values, candidate) {
+	if type(values) != "array" {
+		return false
+	}
+	i := 0
+	while i < len(values) {
+		if values[i] == candidate {
+			return true
+		}
+		i := i + 1
+	}
+	return false
+}
+
+func non_empty_string(value) {
+	if type(value) != "string" {
+		return ""
+	}
+	return trim(value)
+}
+
+func model_resolution_success(provider_name, model, preference_class, source, requested_preferred, fallback_requested) {
+	return {
+		"ok": true,
+		"provider": provider_name,
+		"model": model,
+		"preference_class": preference_class,
+		"source": source,
+		"requested_preferred": requested_preferred,
+		"fallback_requested": fallback_requested
+	}
+}
+
+func resolve_model_preference_impl(provider, preference) {
+	if type(provider) != "dict" {
+		return {
+			"ok": false,
+			"provider": "",
+			"model": "",
+			"preference_class": "",
+			"source": "invalid_provider",
+			"requested_preferred": [],
+			"fallback_requested": "",
+			"error": {
+				"code": "invalid_model_preference",
+				"message": "Model preference resolution requires a provider dict."
+			}
+		}
+	}
+
+	provider_name := non_empty_string(dict_get_or(provider, "name", ""))
+	default_model := non_empty_string(dict_get_or(provider, "default_model", ""))
+	if default_model == "" {
+		return {
+			"ok": false,
+			"provider": provider_name,
+			"model": "",
+			"preference_class": "",
+			"source": "missing_provider_default",
+			"requested_preferred": [],
+			"fallback_requested": "",
+			"error": {
+				"code": "invalid_model_preference",
+				"message": "Provider must define a non-empty default_model."
+			}
+		}
+	}
+
+	if type(preference) != "dict" {
+		return model_resolution_success(provider_name, default_model, "", "provider_default", [], "")
+	}
+
+	preference_class := non_empty_string(dict_get_or(preference, "class", ""))
+	requested_preferred := dict_get_or(preference, "preferred", [])
+	if type(requested_preferred) != "array" {
+		requested_preferred := []
+	}
+	fallback_requested := non_empty_string(dict_get_or(preference, "fallback", ""))
+
+	resolved_model_id := non_empty_string(dict_get_or(preference, "resolved_model_id", ""))
+	if resolved_model_id != "" {
+		return model_resolution_success(provider_name, resolved_model_id, preference_class, "resolved_model_id", requested_preferred, fallback_requested)
+	}
+
+	provider_overrides := dict_get_or(preference, "provider_overrides", {})
+	if type(provider_overrides) == "dict" {
+		provider_override := non_empty_string(dict_get_or(provider_overrides, provider_name, ""))
+		if provider_override != "" {
+			return model_resolution_success(provider_name, provider_override, preference_class, "provider_override", requested_preferred, fallback_requested)
+		}
+	}
+
+	class_models := dict_get_or(provider, "model_preferences", {})
+	if type(class_models) == "dict" && preference_class != "" {
+		class_model := non_empty_string(dict_get_or(class_models, preference_class, ""))
+		if class_model != "" {
+			return model_resolution_success(provider_name, class_model, preference_class, "provider_class", requested_preferred, fallback_requested)
+		}
+	}
+
+	supported_models := dict_get_or(provider, "supported_models", [])
+	i := 0
+	while i < len(requested_preferred) {
+		candidate := non_empty_string(requested_preferred[i])
+		if candidate != "" {
+			if candidate == default_model || string_array_contains(supported_models, candidate) {
+				return model_resolution_success(provider_name, candidate, preference_class, "preferred_compatible", requested_preferred, fallback_requested)
+			}
+		}
+		i := i + 1
+	}
+
+	if fallback_requested != "" {
+		if fallback_requested == default_model || string_array_contains(supported_models, fallback_requested) {
+			return model_resolution_success(provider_name, fallback_requested, preference_class, "fallback_compatible", requested_preferred, fallback_requested)
+		}
+	}
+
+	return model_resolution_success(provider_name, default_model, preference_class, "provider_default", requested_preferred, fallback_requested)
 }
 
 func create_client_impl(provider, api_key_override) {
@@ -3251,6 +3374,7 @@ func chat_completion_stream_impl(client, messages, options, on_event) {
 
 export provider_supports := provider_supports_impl
 export provider_metadata := provider_metadata_impl
+export resolve_model_preference := resolve_model_preference_impl
 export create_client := create_client_impl
 export create_message := create_message_impl
 export build_chat_payload := build_chat_payload_impl
