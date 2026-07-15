@@ -927,6 +927,36 @@ func extract_stream_delta_tool_calls(choice) {
 	return dict_get_or(delta, "tool_calls", [])
 }
 
+func merge_stream_tool_calls(accumulated, deltas) {
+	if type(accumulated) != "array" { accumulated = [] }
+	if type(deltas) != "array" { return accumulated }
+	for delta_call in deltas {
+		if type(delta_call) != "dict" { continue }
+		index := dict_get_or(delta_call, "index", len(accumulated))
+		if type(index) != "int" { index = len(accumulated) }
+		if index < 0 || index > 31 { continue }
+		while len(accumulated) <= index { accumulated = push(accumulated, {"id":"","type":"function","function":{"name":"","arguments":""}}) }
+		merged := accumulated[index]
+		if type(merged) != "dict" { merged = {"id":"","type":"function","function":{"name":"","arguments":""}} }
+		for key in ["id","type"] {
+			value := dict_get_or(delta_call,key,"")
+			if value != "" { merged[key] = value }
+		}
+		merged_function := dict_get_or(merged,"function",{})
+		if type(merged_function) != "dict" { merged_function = {} }
+		delta_function := dict_get_or(delta_call,"function",{})
+		if type(delta_function) == "dict" {
+			name := dict_get_or(delta_function,"name","")
+			if name != "" { merged_function["name"] = name }
+			arguments_delta := dict_get_or(delta_function,"arguments","")
+			if arguments_delta != "" { merged_function["arguments"] = to_string(dict_get_or(merged_function,"arguments","")) + to_string(arguments_delta) }
+		}
+		merged["function"] = merged_function
+		accumulated[index] = merged
+	}
+	return accumulated
+}
+
 func message_character_count(messages) {
 	if type(messages) != "array" {
 		return 0
@@ -1223,11 +1253,7 @@ func normalize_stream_success_response(client, status_code, stream_events, fallb
 							output_text := output_text + delta_text
 						}
 						delta_tool_calls := extract_stream_delta_tool_calls(first_choice)
-						if type(delta_tool_calls) == "array" {
-							if len(delta_tool_calls) > 0 {
-								tool_calls := delta_tool_calls
-							}
-						}
+						if type(delta_tool_calls) == "array" && len(delta_tool_calls) > 0 { tool_calls = merge_stream_tool_calls(tool_calls,delta_tool_calls) }
 
 						candidate_finish_reason := dict_get_or(first_choice, "finish_reason", "")
 						if candidate_finish_reason != "" {

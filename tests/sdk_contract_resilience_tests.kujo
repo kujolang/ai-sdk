@@ -664,6 +664,22 @@ test "stream normalization handles no-delta events" {
 	assert_equal(result["finish_reason"], "stop")
 }
 
+test "stream normalization assembles chunked tool calls" {
+	provider := openai_provider()
+	client := create_client(provider, "fixture-key")
+	stream_events := [
+		{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-1","type":"function","function":{"name":"relay.read_file","arguments":"{\"path\":"}}]},"finish_reason":""}]},
+		{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"README.md\"}"}}]},"finish_reason":"tool_calls"}]},
+		{"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":4,"total_tokens":14}}
+	]
+	result := normalize_stream_success(client,200,stream_events,"fallback-model")
+	assert_true(result["ok"])
+	assert_equal(result["finish_reason"],"tool_calls")
+	assert_equal(result["tool_calls"][0]["function"]["name"],"relay.read_file")
+	assert_equal(result["tool_calls"][0]["function"]["arguments"],"{\"path\":\"README.md\"}")
+	assert_equal(result["usage"]["total_tokens"],14)
+}
+
 test "streaming returns normalized error when callback throws on done event" {
 	provider := openai_provider()
 	client := create_client(provider, "fixture-key")
@@ -1081,4 +1097,3 @@ test "endpoint allowlist normalizes host case and trailing dot" {
 	assert_equal(blocked["error"]["code"], "endpoint_policy_violation")
 	assert_equal(blocked["status_code"], 403)
 }
-
