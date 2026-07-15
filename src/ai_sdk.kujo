@@ -396,6 +396,11 @@ func build_chat_payload_with_resolved(client, messages, options, resolved) {
 		"max_tokens": resolved["max_tokens"],
 		"stream": resolved["stream"]
 	}
+	if resolved["stream"] {
+		# OpenAI-compatible providers only include token accounting in the
+		# terminal stream event when explicitly requested.
+		payload["stream_options"] := {"include_usage": true}
+	}
 
 	if type(options) == "dict" {
 		if has_key(options, "tools") {

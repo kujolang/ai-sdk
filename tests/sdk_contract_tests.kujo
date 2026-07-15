@@ -85,6 +85,7 @@ test "build_chat_payload applies defaults and overrides" {
 	assert_equal(overrides["temperature"], 0.55)
 	assert_equal(overrides["max_tokens"], 128)
 	assert_true(overrides["stream"])
+	assert_true(overrides["stream_options"]["include_usage"])
 	assert_equal(has_key(overrides, "tools"), 1)
 }
 
