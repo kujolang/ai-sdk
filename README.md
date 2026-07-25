@@ -46,20 +46,20 @@ It is designed to be production-adjacent out of the box: deterministic fixtures,
 
 ## Runtime Command Setup
 
-Use a single runtime selector for all commands in this README:
+Use the installed Kujo command for the examples in this README:
 
 ```bash
-export KUJO_BIN="${KUJO_BIN:-kujo}"
-./kujo test-run --help >/dev/null
+kujo --version
+kujo test-run --help >/dev/null
 ```
 
-If the `test-run` help command fails, set `KUJO_BIN` to your Kujo runtime binary path and rerun through `./kujo`.
+If `kujo` does not resolve, install Kujo or fix your `PATH` before continuing.
 
 ## Quick Start
 
 ```bash
 cd ai-sdk
-./kujo run examples/main.kujo
+kujo run examples/main.kujo
 ```
 
 If `OPENAI_API_KEY` is missing, the example automatically falls back to fixture mode.
@@ -83,14 +83,14 @@ OpenAI:
 
 ```bash
 export OPENAI_API_KEY="your_api_key"
-./kujo run examples/main.kujo
+kujo run examples/main.kujo
 ```
 
 DeepSeek:
 
 ```bash
 export DEEPSEEK_API_KEY="your_api_key"
-./kujo run examples/main.kujo
+kujo run examples/main.kujo
 ```
 
 The provider preset defines which environment variable is read for credentials.
@@ -422,7 +422,7 @@ Local-dev opt-in options:
 
 ## Project Structure
 
-The root directory intentionally contains only package metadata, license/changelog/readme files, the local `./kujo` wrapper, and organized project folders. SDK implementation lives under `src/`; examples, scripts, tests, schemas, docs, and workflows stay in their own directories.
+The root directory intentionally contains only package metadata, license/changelog/readme files, and organized project folders. SDK implementation lives under `src/`; examples, scripts, tests, schemas, docs, and workflows stay in their own directories.
 
 - [src/ai_sdk.kujo](src/ai_sdk.kujo): Core SDK behavior (normalization, retries, streaming, fixture mode)
 - [src/providers.kujo](src/providers.kujo): Provider presets/capabilities
@@ -479,61 +479,61 @@ The root directory intentionally contains only package metadata, license/changel
 Core contract suite:
 
 ```bash
-"$KUJO_BIN" test-run tests/sdk_contract_tests.kujo
+kujo test-run tests/sdk_contract_tests.kujo
 ```
 
 Contract resilience suite:
 
 ```bash
-"$KUJO_BIN" test-run tests/sdk_contract_resilience_tests.kujo
+kujo test-run tests/sdk_contract_resilience_tests.kujo
 ```
 
 Contract embeddings suite:
 
 ```bash
-"$KUJO_BIN" test-run tests/sdk_contract_embeddings_tests.kujo
+kujo test-run tests/sdk_contract_embeddings_tests.kujo
 ```
 
 Security redaction suite:
 
 ```bash
-"$KUJO_BIN" test-run tests/security_redaction_tests.kujo
+kujo test-run tests/security_redaction_tests.kujo
 ```
 
 Reliability failure-mode suite:
 
 ```bash
-"$KUJO_BIN" test-run tests/reliability_failure_modes_tests.kujo
+kujo test-run tests/reliability_failure_modes_tests.kujo
 ```
 
 Parser fuzz/smoke suite:
 
 ```bash
-"$KUJO_BIN" test-run tests/parser_fuzz_smoke_tests.kujo
+kujo test-run tests/parser_fuzz_smoke_tests.kujo
 ```
 
 Feature smoke suite:
 
 ```bash
-"$KUJO_BIN" test-run tests/feature_smoke_tests.kujo
+kujo test-run tests/feature_smoke_tests.kujo
 ```
 
 Telemetry bridge example:
 
 ```bash
-./kujo run examples/telemetry_bridge.kujo --interpreter
+kujo run examples/telemetry_bridge.kujo --interpreter
 ```
 
 Production profile example:
 
 ```bash
-./kujo run examples/production_profile.kujo
+kujo run examples/production_profile.kujo
 ```
 
 Live-provider smoke test (used by release validation workflow):
 
 ```bash
-./kujo test-run tests/live_provider_smoke_tests.kujo
+kujo test-run tests/live_provider_smoke_tests.kujo
 ```
 
 If no provider key is configured (`OPENAI_API_KEY`, `DEEPSEEK_API_KEY`, `OPENROUTER_API_KEY`), the live smoke test exits as a documented skip path.
@@ -587,7 +587,7 @@ For each release candidate, follow [docs/RELEASE_CANDIDATE_CHECKLIST.md](docs/RE
 ## Stress Harness
 
 ```bash
-./kujo run scripts/stress_harness.kujo
+kujo run scripts/stress_harness.kujo
 ```
 
 ## GitHub Readiness Checklist
