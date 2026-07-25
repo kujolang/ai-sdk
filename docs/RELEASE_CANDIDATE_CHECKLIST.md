@@ -6,7 +6,7 @@ before tagging. Run every command from the repository root.
 ## 0. Select the Runtime
 
 ```bash
-export KUJO_BIN="${KUJO_BIN:-/path/to/kujo/target/release/kujo}"
+export KUJO_BIN="${KUJO_BIN:-kujo}"
 ./kujo test-run --help >/dev/null
 ```
 
@@ -76,7 +76,7 @@ paths only.
 ## Quick Sequence (No Checkboxes)
 
 ```bash
-export KUJO_BIN="${KUJO_BIN:-/path/to/kujo/target/release/kujo}"
+export KUJO_BIN="${KUJO_BIN:-kujo}"
 bash scripts/supply_chain_policy_check.sh
 bash scripts/verify_contract_schemas.sh
 bash scripts/release_quality_gates.sh

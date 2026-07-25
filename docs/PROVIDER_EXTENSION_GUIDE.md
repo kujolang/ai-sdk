@@ -56,7 +56,7 @@ Update `tests/sdk_contract_tests.kujo` with provider-focused tests:
 Run:
 
 ```bash
-export KUJO_BIN="${KUJO_BIN:-/path/to/kujo/target/debug/kujo}"
+export KUJO_BIN="${KUJO_BIN:-kujo}"
 ./kujo test-run --help >/dev/null
 ./kujo test-run tests/sdk_contract_tests.kujo
 ./kujo run examples/main.kujo

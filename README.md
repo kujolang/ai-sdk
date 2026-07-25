@@ -49,7 +49,7 @@ It is designed to be production-adjacent out of the box: deterministic fixtures,
 Use a single runtime selector for all commands in this README:
 
 ```bash
-export KUJO_BIN="${KUJO_BIN:-/path/to/kujo/target/debug/kujo}"
+export KUJO_BIN="${KUJO_BIN:-kujo}"
 ./kujo test-run --help >/dev/null
 ```
 
