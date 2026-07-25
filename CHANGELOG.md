@@ -8,6 +8,7 @@ The format is based on Keep a Changelog and this project follows semantic versio
 
 ### Added
 
+- Launch-readiness Spec and Eval suite for prelaunch review, with live-provider proof kept external unless credentials are explicitly configured and approved.
 - Provider-owned `resolve_model_preference(provider, preference)` routing with explicit resolution provenance, provider class mappings, overrides, and deterministic fallback behavior.
 - `provider_metadata(provider)` helper returning safe-to-log provider identity and capabilities (never a resolved API key).
 - `max_raw_response_bytes` option that rejects oversized provider responses with a deterministic, redacted `response_too_large` error before parsing.
@@ -22,6 +23,7 @@ The format is based on Keep a Changelog and this project follows semantic versio
 
 ### Changed
 
+- README readiness wording now scopes AI SDK as a release-candidate-oriented validation baseline rather than a universal production certification.
 - Raised release-gate test floors (aggregate floor 61 → 95); total test count grew from 90 to 100.
 
 ## [1.0.0] - 2026-06-10

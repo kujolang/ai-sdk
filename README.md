@@ -21,11 +21,11 @@ This repository is library-first: import `src/ai_sdk.kujo` and `src/providers.ku
 
 New here? Start with the [Adoption Guide](docs/ADOPTION_GUIDE.md), which maps every SDK feature to the security, reliability, observability, cost, and CI concern it addresses, then add your own endpoint with the [Build Your First Provider](docs/BUILD_YOUR_FIRST_PROVIDER.md) walkthrough.
 
-## Production Readiness Position
+## Launch Readiness Position
 
-AI SDK is a strong enterprise-hardening baseline, not a blanket production certification for every environment.
+AI SDK is a release-candidate-oriented enterprise-hardening baseline, not a blanket production certification for every environment.
 
-It is designed to be production-adjacent out of the box: deterministic fixtures, normalized contracts, retries, fallback providers, timeouts, breaker controls, host allowlists, redaction, governance budgets, CI release gates, and schema checks are already present. Before adopting it in a regulated or large-scale deployment, teams should still pin provider/runtime versions, configure live-provider smoke evidence, review outbound host policy, wire observability hooks, set tenant-appropriate token/cost budgets, and run the release gates in their own CI.
+It is designed to support production-adjacent validation work: deterministic fixtures, normalized contracts, retries, fallback providers, timeouts, breaker controls, host allowlists, redaction, governance budgets, CI release gates, and schema checks are already present. Before adopting it in a regulated or large-scale deployment, teams must still pin provider/runtime versions, configure live-provider smoke evidence, review outbound host policy, wire observability hooks, set tenant-appropriate token/cost budgets, and run the release gates in their own CI.
 
 ## Highlights
 

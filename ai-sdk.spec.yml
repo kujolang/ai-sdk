@@ -1,0 +1,64 @@
+# Spec - AI SDK launch readiness review
+
+name: "AI SDK launch readiness review"
+goal: "Keep AI SDK locally release-ready as provider-gated Kujo SDK primitives with deterministic offline fixtures, normalized contracts, and security/reliability gates."
+version: "0.1.0"
+background: "AI SDK is part of the Kujo prelaunch ecosystem review. Its local proof uses fixture mode by default; live provider proof requires configured credentials and target-environment validation."
+scope: "Repository-local contract tests, fixture-mode examples, security redaction, reliability failure modes, schema verification, benchmark quality gates, readiness wording, and launch evidence capture."
+non_goals:
+  - "Publishing packages or public releases"
+  - "Using live provider credentials without explicit approval"
+  - "Claiming production or enterprise readiness without target-environment live-provider evidence"
+relevant_systems:
+  - "Kujo runtime"
+  - "AI SDK provider presets"
+  - "offline fixture mode"
+  - "prelaunch launch evidence packet"
+likely_files:
+  - "README.md"
+  - "src/ai_sdk.kujo"
+  - "src/providers.kujo"
+  - "scripts/release_quality_gates.sh"
+  - "docs/RELEASE_CANDIDATE_CHECKLIST.md"
+acceptance_criteria:
+  - "README readiness wording stays scoped to release-candidate-oriented validation."
+  - "Fixture-mode examples run without provider credentials."
+  - "Contract, resilience, embeddings, security, reliability, parser fuzz, and feature smoke suites pass locally."
+  - "Release quality gates, supply-chain policy, and schema verification pass locally."
+  - "Live provider smoke is recorded as external unless a provider secret is configured and approved for use."
+eval_requirements:
+  - description: "Run release quality gates."
+    check_type: "command"
+    params:
+      command: "KUJO_BIN=kujo bash scripts/release_quality_gates.sh"
+  - description: "Run supply-chain policy and contract schema checks."
+    check_type: "command"
+    params:
+      command: "bash scripts/supply_chain_policy_check.sh && bash scripts/verify_contract_schemas.sh"
+  - description: "Run fixture-mode examples."
+    check_type: "command"
+    params:
+      command: "./kujo run examples/main.kujo && ./kujo run examples/production_profile.kujo && ./kujo run examples/telemetry_bridge.kujo --interpreter && kujo run examples/model_preferences.kujo"
+risks:
+  - risk: "Live provider behavior is unproven when no provider key is configured."
+    mitigation: "Treat live provider smoke as an external blocker unless credentials are explicitly provided and approved for use."
+    severity: "high"
+  - risk: "Provider routing or response contracts can drift from docs."
+    mitigation: "Keep schema verification, release quality gates, and contract tests in the launch evidence packet."
+    severity: "medium"
+dependencies:
+  - "kujo on PATH"
+  - "Fixture mode for local proof"
+  - "Provider credentials only for external live-provider proof"
+review_expectations:
+  - "Review contract schemas, release quality output, and provider policy before sign-off."
+  - "Review live-provider smoke evidence in the target environment before production claims."
+human_approval_points:
+  - "Before publishing packages or public releases"
+  - "Before using live provider credentials"
+  - "Before production or enterprise readiness claims"
+priority: "high"
+tags:
+  - "kujo"
+  - "ai-sdk"
+  - "launch-readiness"

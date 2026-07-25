@@ -1,0 +1,34 @@
+{
+  "name": "ai-sdk-launch-readiness",
+  "version": "0.1.0",
+  "tests": [
+    {
+      "name": "AI SDK fixture example succeeds",
+      "check": "command_succeeds",
+      "params": {
+        "command": "cd /Users/robertdevore/2026/Kujolang/kujo-repos/ai-sdk && ./kujo run examples/main.kujo"
+      }
+    },
+    {
+      "name": "AI SDK production profile example succeeds",
+      "check": "command_succeeds",
+      "params": {
+        "command": "cd /Users/robertdevore/2026/Kujolang/kujo-repos/ai-sdk && ./kujo run examples/production_profile.kujo"
+      }
+    },
+    {
+      "name": "AI SDK package metadata exists",
+      "check": "file_exists",
+      "params": {
+        "path": "kennel.toml"
+      }
+    },
+    {
+      "name": "AI SDK project metadata exists",
+      "check": "file_exists",
+      "params": {
+        "path": "kujo.toml"
+      }
+    }
+  ]
+}
