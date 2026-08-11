@@ -46,7 +46,7 @@ run_test_suite_with_floor() {
 }
 
 TOTAL_TEST_COUNT=0
-MIN_TOTAL_TEST_FLOOR=95
+MIN_TOTAL_TEST_FLOOR=105
 
 run_test_suite_with_floor tests/sdk_contract_tests.kujo 28
 run_test_suite_with_floor tests/sdk_contract_resilience_tests.kujo 39
@@ -55,6 +55,7 @@ run_test_suite_with_floor tests/security_redaction_tests.kujo 3
 run_test_suite_with_floor tests/reliability_failure_modes_tests.kujo 9
 run_test_suite_with_floor tests/parser_fuzz_smoke_tests.kujo 3
 run_test_suite_with_floor tests/feature_smoke_tests.kujo 3
+run_test_suite_with_floor tests/bugfix_regression_tests.kujo 10
 run_test_suite_with_floor tests/live_provider_smoke_tests.kujo 1
 
 if (( TOTAL_TEST_COUNT < MIN_TOTAL_TEST_FLOOR )); then

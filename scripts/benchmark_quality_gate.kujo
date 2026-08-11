@@ -138,8 +138,10 @@ benchmark_cases := [
 	{
 		"name": "chat_normalization_path",
 		"iterations": 300,
-		"max_avg_latency_ms": 25.0,
-		"min_throughput_rps": 35.0
+		# Fixture chat now enforces the same request and governance budgets as live
+		# chat before returning its deterministic response.
+		"max_avg_latency_ms": 30.0,
+		"min_throughput_rps": 33.0
 	},
 	{
 		"name": "embeddings_normalization_path",
@@ -156,8 +158,10 @@ benchmark_cases := [
 	{
 		"name": "stream_parse_normalization_path",
 		"iterations": 300,
-		"max_avg_latency_ms": 25.0,
-		"min_throughput_rps": 30.0
+		# Streaming normalization now recursively redacts every retained raw SSE
+		# event. Keep a blocking floor that includes that security work.
+		"max_avg_latency_ms": 40.0,
+		"min_throughput_rps": 25.0
 	},
 	{
 		"name": "chat_retry_path",
