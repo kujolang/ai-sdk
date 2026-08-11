@@ -113,7 +113,7 @@ test "embeddings does not retry on non-retryable 400" {
 	})
 
 	assert_false(result["ok"])
-	assert_equal(result["error"]["code"], "http_error")
+	assert_equal(result["error"]["code"], "provider_error")
 	assert_equal(result["status_code"], 400)
 }
 
@@ -251,7 +251,7 @@ test "embeddings fallback is skipped on non-retryable primary failure" {
 
 	assert_false(result["ok"])
 	assert_equal(result["status_code"], 400)
-	assert_equal(result["error"]["code"], "http_error")
+	assert_equal(result["error"]["code"], "provider_error")
 	assert_equal(has_key(result, "fallback"), 0)
 }
 

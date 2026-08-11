@@ -420,46 +420,62 @@ func build_chat_payload_impl(client, messages, options) {
 }
 
 func is_sensitive_key_name(key_name) {
-	if is_non_secret_token_count_key(key_name) {
+	if type(key_name) != "string" {
 		return false
 	}
-	if key_name == "authorization" || key_name == "Authorization" {
+	# Fast-path the stable OpenAI-compatible response vocabulary. These keys are
+	# traversed on every successful response and none can carry credentials by
+	# definition; unknown keys still receive case-insensitive secret detection.
+	if key_name == "id" || key_name == "model" || key_name == "object" || key_name == "created" {
+		return false
+	}
+	if key_name == "choices" || key_name == "message" || key_name == "content" || key_name == "text" || key_name == "value" {
+		return false
+	}
+	if key_name == "type" || key_name == "finish_reason" || key_name == "usage" || key_name == "index" || key_name == "embedding" || key_name == "vector" {
+		return false
+	}
+	if key_name == "delta" || key_name == "function" || key_name == "name" || key_name == "arguments" || key_name == "tool_calls" {
+		return false
+	}
+	normalized_key := lower(key_name)
+	if is_non_secret_token_count_key(normalized_key) {
+		return false
+	}
+	if normalized_key == "authorization" {
 		return true
 	}
-	if key_name == "api_key" || key_name == "apiKey" || key_name == "x-api-key" || key_name == "X-API-Key" {
+	if normalized_key == "api_key" || normalized_key == "apikey" || normalized_key == "x-api-key" {
 		return true
 	}
-	if key_name == "api-key" || key_name == "apikey" {
+	if normalized_key == "api-key" {
 		return true
 	}
-	if key_name == "client_secret" || key_name == "clientSecret" {
+	if normalized_key == "client_secret" || normalized_key == "clientsecret" {
 		return true
 	}
-	if key_name == "private_key" || key_name == "privateKey" {
+	if normalized_key == "private_key" || normalized_key == "privatekey" {
 		return true
 	}
-	if key_name == "id_token" || key_name == "idToken" || key_name == "session_token" || key_name == "sessionToken" {
+	if normalized_key == "id_token" || normalized_key == "idtoken" || normalized_key == "session_token" || normalized_key == "sessiontoken" {
 		return true
 	}
-	if key_name == "jwt" || key_name == "jwt_token" || key_name == "credentials" || key_name == "credential" {
+	if normalized_key == "jwt" || normalized_key == "jwt_token" || normalized_key == "credentials" || normalized_key == "credential" {
 		return true
 	}
-	if key_name == "token" || key_name == "access_token" || key_name == "refresh_token" {
+	if normalized_key == "token" || normalized_key == "access_token" || normalized_key == "refresh_token" {
 		return true
 	}
-	if key_name == "password" || key_name == "secret" {
+	if normalized_key == "password" || normalized_key == "secret" {
 		return true
 	}
-	if contains(key_name, "apiKey") || contains(key_name, "api_key") || contains(key_name, "privateKey") || contains(key_name, "private_key") {
+	if contains(normalized_key, "apikey") || contains(normalized_key, "api_key") || contains(normalized_key, "privatekey") || contains(normalized_key, "private_key") {
 		return true
 	}
-	if contains(key_name, "Token") || contains(key_name, "Secret") || contains(key_name, "Password") || contains(key_name, "Credential") {
+	if contains(normalized_key, "token") || contains(normalized_key, "secret") || contains(normalized_key, "password") {
 		return true
 	}
-	if contains(key_name, "token") || contains(key_name, "secret") || contains(key_name, "password") {
-		return true
-	}
-	if contains(key_name, "credential") {
+	if contains(normalized_key, "credential") {
 		return true
 	}
 	return false
@@ -514,10 +530,8 @@ func redact_sensitive_payload(raw_value) {
 
 	if type(raw_value) == "array" {
 		redacted_items := []
-		i := 0
-		while i < len(raw_value) {
-			redacted_items := push(redacted_items, redact_sensitive_payload(raw_value[i]))
-			i := i + 1
+		for raw_item in raw_value {
+			redacted_items = push(redacted_items, redact_sensitive_payload(raw_item))
 		}
 		return redacted_items
 	}
@@ -662,7 +676,7 @@ func normalize_provider_error_payload(client, status_code, data) {
 		err_message,
 		status_code,
 		data,
-		false
+		is_retryable_http_status(status_code)
 	)
 	normalized_error := dict_get_or(response, "error", {})
 
@@ -684,13 +698,33 @@ func normalize_provider_error_payload(client, status_code, data) {
 	return response
 }
 
-func fixture_response_impl(client) {
+func normalize_http_failure_response(client, status_code, response, body_text) {
+	parsed := parse_json_safe(body_text)
+	if parsed["ok"] {
+		data := parsed["data"]
+		if type(data) == "dict" && has_key(data, "error") {
+			return normalize_provider_error_payload(client, status_code, data)
+		}
+	}
+
+	return standard_error_response_impl(
+		client,
+		"http_error",
+		"HTTP " + to_string(status_code),
+		status_code,
+		response,
+		is_retryable_http_status(status_code)
+	)
+}
+
+func fixture_response_impl(client, payload) {
+	model := dict_get_or(payload, "model", client["provider"]["default_model"])
 	return {
 		"ok": true,
 		"provider": client["provider"]["name"],
 		"contract_version": contract_version_value(),
 		"request_id": "chatcmpl-kujo-fixture-1",
-		"model": client["provider"]["default_model"],
+		"model": model,
 		"output_text": "Standardized AI SDK responses reduce integration complexity and speed up development.",
 		"finish_reason": "stop",
 		"tool_calls": [],
@@ -703,7 +737,7 @@ func fixture_response_impl(client) {
 		"normalized_at": current_timestamp(),
 		"raw": {
 			"id": "chatcmpl-kujo-fixture-1",
-			"model": client["provider"]["default_model"]
+			"model": model
 		}
 	}
 }
@@ -1069,8 +1103,8 @@ func persist_governance_cost_usage(client, resolved_options, value) {
 
 func enforce_governance_preflight(client, messages, payload, resolved_options) {
 	max_total_tokens_per_request := dict_get_or(resolved_options, "max_total_tokens_per_request", 0)
-	planned_tokens := planned_request_total_tokens(messages, payload, resolved_options)
 	if max_total_tokens_per_request > 0 {
+		planned_tokens := planned_request_total_tokens(messages, payload, resolved_options)
 		if planned_tokens > max_total_tokens_per_request {
 			return governance_error_response(
 				client,
@@ -1274,6 +1308,12 @@ func normalize_stream_success_response(client, status_code, stream_events, fallb
 		finish_reason := "stop"
 	}
 
+	i := 0
+	while i < len(stream_events) {
+		stream_events[i] = redact_sensitive_payload(stream_events[i])
+		i := i + 1
+	}
+
 	raw := {
 		"stream_mode": true,
 		"stream_events": stream_events,
@@ -1342,8 +1382,8 @@ func planned_embeddings_total_tokens(input_value) {
 
 func enforce_embeddings_governance_preflight(client, input_value, payload, resolved_options) {
 	max_total_tokens_per_request := dict_get_or(resolved_options, "max_total_tokens_per_request", 0)
-	planned_tokens := planned_embeddings_total_tokens(input_value)
 	if max_total_tokens_per_request > 0 {
+		planned_tokens := planned_embeddings_total_tokens(input_value)
 		if planned_tokens > max_total_tokens_per_request {
 			return governance_error_response(
 				client,
@@ -1632,15 +1672,7 @@ func execute_embeddings_request_once(client, payload, resolved_options, attempt,
 			}
 
 			if status_code < 200 || status_code > 299 {
-				retryable_http_error := is_retryable_http_status(status_code)
-				result := standard_error_response_impl(
-					client,
-					"http_error",
-					"HTTP " + to_string(status_code),
-					status_code,
-					response,
-					retryable_http_error
-				)
+				result := normalize_http_failure_response(client, status_code, response, body_text)
 				return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
 			}
 
@@ -1663,6 +1695,9 @@ func execute_embeddings_request_once(client, payload, resolved_options, attempt,
 					result := normalize_provider_error_payload(client, status_code, data)
 					return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
 				}
+			} else {
+				result := standard_error_response_impl(client, "invalid_response", "Provider response must be a JSON object.", status_code, data, false)
+				return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
 			}
 
 			result := normalize_embeddings_success_response(client, status_code, data, payload["model"])
@@ -1835,6 +1870,9 @@ func embeddings_impl(client, input_value, options) {
 	request_context := build_embeddings_request_context(client, payload, options, resolved_options)
 
 	max_retries := resolved_options["max_retries"]
+	if max_retries < 0 {
+		max_retries := 0
+	}
 	retry_budget := resolved_options["retry_budget"]
 	if retry_budget < 0 {
 		retry_budget := 0
@@ -1939,7 +1977,7 @@ func parse_sse_lines(body_text) {
 	while i < len(lines) {
 		line := trim(lines[i])
 		if starts_with(line, "data:") {
-			payload_text := trim(replace(line, "data:", ""))
+			payload_text := trim(substring(line, 5, len(line)))
 			if payload_text == "[DONE]" {
 				if current_payload != "" {
 					parsed_event := parse_json_safe(current_payload)
@@ -2007,7 +2045,7 @@ func parse_sse_chunks(chunks) {
 		while line_index < line_count - 1 {
 			line := trim(lines[line_index])
 			if starts_with(line, "data:") {
-				payload_text := trim(replace(line, "data:", ""))
+				payload_text := trim(substring(line, 5, len(line)))
 				if payload_text == "[DONE]" {
 					if current_payload != "" {
 						parsed_event := parse_json_safe(current_payload)
@@ -2046,7 +2084,7 @@ func parse_sse_chunks(chunks) {
 	if trim(buffer) != "" {
 		line := trim(buffer)
 		if starts_with(line, "data:") {
-			payload_text := trim(replace(line, "data:", ""))
+			payload_text := trim(substring(line, 5, len(line)))
 			if payload_text != "[DONE]" && payload_text != "" {
 				if current_payload == "" {
 					current_payload := payload_text
@@ -2155,6 +2193,18 @@ func compute_retry_jitter_ms(attempt, jitter_window_ms) {
 }
 
 func compute_retry_delay_ms(attempt, base_delay_ms, max_delay_ms, jitter_window_ms) {
+	if attempt < 0 {
+		attempt := 0
+	}
+	if base_delay_ms < 0 {
+		base_delay_ms := 0
+	}
+	if max_delay_ms < 0 {
+		max_delay_ms := 0
+	}
+	if jitter_window_ms < 0 {
+		jitter_window_ms := 0
+	}
 	delay := base_delay_ms
 	i := 0
 	while i < attempt {
@@ -2169,31 +2219,14 @@ func compute_retry_delay_ms(attempt, base_delay_ms, max_delay_ms, jitter_window_
 }
 
 func canonical_header_name(header_name) {
-	if header_name == "Authorization" {
+	if type(header_name) != "string" {
+		return header_name
+	}
+	normalized_name := lower(header_name)
+	if normalized_name == "authorization" {
 		return "Authorization"
 	}
-	if header_name == "authorization" {
-		return "Authorization"
-	}
-	if header_name == "AUTHORIZATION" {
-		return "Authorization"
-	}
-	if header_name == "AuthoriZation" {
-		return "Authorization"
-	}
-	if header_name == "Content-Type" {
-		return "Content-Type"
-	}
-	if header_name == "content-type" {
-		return "Content-Type"
-	}
-	if header_name == "CONTENT-TYPE" {
-		return "Content-Type"
-	}
-	if header_name == "Content-type" {
-		return "Content-Type"
-	}
-	if header_name == "content-Type" {
+	if normalized_name == "content-type" {
 		return "Content-Type"
 	}
 	return header_name
@@ -2818,28 +2851,8 @@ func execute_request_once(client, messages, options, resolved_options, payload, 
 				return finalize_request_result(size_guardrail_error, resolved_options, attempt, started_at, trace_id, request_id)
 			}
 
-			if status_code < 200 {
-				retryable_http_error := is_retryable_http_status(status_code)
-				result := standard_error_response_impl(
-					client,
-					"http_error",
-					"HTTP " + to_string(status_code),
-					status_code,
-					response,
-					retryable_http_error
-				)
-				return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
-			}
-			if status_code > 299 {
-				retryable_http_error := is_retryable_http_status(status_code)
-				result := standard_error_response_impl(
-					client,
-					"http_error",
-					"HTTP " + to_string(status_code),
-					status_code,
-					response,
-					retryable_http_error
-				)
+			if status_code < 200 || status_code > 299 {
+				result := normalize_http_failure_response(client, status_code, response, body_text)
 				return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
 			}
 
@@ -2879,6 +2892,9 @@ func execute_request_once(client, messages, options, resolved_options, payload, 
 					result := normalize_provider_error_payload(client, status_code, data)
 					return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
 				}
+			} else {
+				result := standard_error_response_impl(client, "invalid_response", "Provider response must be a JSON object.", status_code, data, false)
+				return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
 			}
 
 			result := normalize_success_response(client, status_code, data, payload["model"])
@@ -3025,7 +3041,23 @@ func chat_completion_impl(client, messages, options) {
 	}
 
 	if resolved_options["offline_fixture"] {
-		return fixture_response_impl(client)
+		fixture_payload := build_chat_payload_with_resolved(client, messages, options, resolved_options)
+		fixture_budget_error := enforce_request_budgets(client, messages, fixture_payload, resolved_options)
+		if type(fixture_budget_error) == "dict" {
+			return fixture_budget_error
+		}
+		if resolved_options["stream"] && !provider_supports_impl(client["provider"], "streaming") {
+			return standard_error_response_impl(client, "unsupported_feature", "Provider does not support streaming.", 0, null, false)
+		}
+		if has_key(fixture_payload, "tools") && !provider_supports_impl(client["provider"], "tool_calls") {
+			return standard_error_response_impl(client, "unsupported_feature", "Provider does not support tool calls.", 0, null, false)
+		}
+		if request_requires_json_mode(options, resolved_options) && !provider_supports_impl(client["provider"], "json_mode") {
+			return standard_error_response_impl(client, "unsupported_feature", "Provider does not support JSON/structured output mode. Remove structured_output_schema/response_format or use a json_mode-capable provider.", 0, null, false)
+		}
+		fixture_result := fixture_response_impl(client, fixture_payload)
+		fixture_result := enforce_structured_output_contract(client, fixture_result, resolved_options)
+		return apply_governance_post_response(client, fixture_result, messages, fixture_payload, resolved_options)
 	}
 
 	missing_key := false
@@ -3136,6 +3168,9 @@ func chat_completion_impl(client, messages, options) {
 	client["in_flight_requests"] := current_in_flight + 1
 
 	max_retries := resolved_options["max_retries"]
+	if max_retries < 0 {
+		max_retries := 0
+	}
 	retry_budget := resolved_options["retry_budget"]
 	if retry_budget < 0 {
 		retry_budget := 0
@@ -3214,6 +3249,17 @@ func chat_completion_impl(client, messages, options) {
 				"error_code": dict_get_or(err_obj, "code", "")
 			}
 			emit_hook_safe(retry_hook, event)
+		}
+		if deadline_ms > 0 {
+			now_ms := current_timestamp()
+			remaining_ms := deadline_ms - now_ms
+			if remaining_ms <= 0 {
+				deadline_result := deadline_exceeded_response(client, deadline_ms, now_ms)
+				return finalize_chat_completion_result(client, deadline_result, start_count, complete_count, retry_count)
+			}
+			if delay_ms > remaining_ms {
+				delay_ms := remaining_ms
+			}
 		}
 		sleep(delay_ms)
 		attempt := attempt + 1

@@ -50,14 +50,26 @@ func validate_custom_provider_base_url(base_url, allow_insecure_localhost) {
 		}
 	}
 
-	if starts_with(trimmed_url, "https://") {
+	lower_url := lower(trimmed_url)
+	parts := split(trimmed_url, "/")
+	if len(parts) < 3 || trim(parts[2]) == "" {
+		return {
+			"ok": false,
+			"error": "Invalid base_url: URL must include a host."
+		}
+	}
+
+	if starts_with(lower_url, "https://") {
 		return {
 			"ok": true,
 			"error": ""
 		}
 	}
 
-	is_localhost_http := starts_with(trimmed_url, "http://localhost") || starts_with(trimmed_url, "http://127.0.0.1")
+	authority := lower(trim(parts[2]))
+	is_localhost_host := authority == "localhost" || starts_with(authority, "localhost:")
+	is_loopback_host := authority == "127.0.0.1" || starts_with(authority, "127.0.0.1:")
+	is_localhost_http := starts_with(lower_url, "http://") && (is_localhost_host || is_loopback_host)
 	if is_localhost_http {
 		if allow_insecure_localhost {
 			return {
@@ -79,10 +91,17 @@ func validate_custom_provider_base_url(base_url, allow_insecure_localhost) {
 
 func custom_openai_compatible_provider_with_options_impl(base_url, api_key_env, default_model, allow_insecure_localhost) {
 	validation := validate_custom_provider_base_url(base_url, allow_insecure_localhost)
+	normalized_base_url := base_url
+	if type(normalized_base_url) == "string" {
+		normalized_base_url := trim(normalized_base_url)
+		while ends_with(normalized_base_url, "/") {
+			normalized_base_url := substring(normalized_base_url, 0, len(normalized_base_url) - 1)
+		}
+	}
 
 	provider := {
 		"name": "openai-compatible",
-		"base_url": base_url,
+		"base_url": normalized_base_url,
 		"chat_path": "/chat/completions",
 		"api_key_env": api_key_env,
 		"default_model": default_model,

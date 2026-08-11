@@ -1,0 +1,106 @@
+test_setup {
+	from src.providers import openai_provider, custom_openai_compatible_provider_with_options
+	from src.ai_sdk import create_client, create_message, chat_completion, embeddings, merge_headers_for_request, normalize_stream_success, parse_sse_contract, retry_delay_contract, standard_error_response
+}
+
+test "localhost opt-in rejects hostname-prefix lookalikes" {
+	provider := custom_openai_compatible_provider_with_options("http://localhost.evil.test/v1", "TEST_KEY", "test-model", true)
+	assert_true(provider["validation_error"] != "")
+}
+
+test "custom provider canonicalizes valid base URL spelling" {
+	provider := custom_openai_compatible_provider_with_options("  HTTPS://example.test/v1/  ", "TEST_KEY", "test-model", false)
+	assert_equal(provider["validation_error"], "")
+	assert_equal(provider["base_url"], "HTTPS://example.test/v1")
+}
+
+test "custom provider rejects URL without a host" {
+	provider := custom_openai_compatible_provider_with_options("https://", "TEST_KEY", "test-model", false)
+	assert_equal(provider["validation_error"], "Invalid base_url: URL must include a host.")
+}
+
+test "protected headers cannot be bypassed with arbitrary casing" {
+	headers := merge_headers_for_request(
+		{"Authorization": "Bearer safe", "Content-Type": "application/json"},
+		{"aUtHoRiZaTiOn": "Bearer attacker", "cOnTeNt-TyPe": "text/plain"},
+		false
+	)
+	assert_equal(headers["Authorization"], "Bearer safe")
+	assert_equal(headers["Content-Type"], "application/json")
+	assert_equal(len(keys(headers)), 2)
+}
+
+test "redaction treats sensitive key names case-insensitively" {
+	client := create_client(openai_provider(), "fixture-key")
+	result := standard_error_response(client, "test", "test", 400, {
+		"AUTHORIZATION": "Bearer secret",
+		"CustomerApiKey": "secret-value"
+	}, false)
+	assert_equal(result["raw"]["AUTHORIZATION"], "[REDACTED]")
+	assert_equal(result["raw"]["CustomerApiKey"], "[REDACTED]")
+}
+
+test "SSE parser preserves data colon text inside JSON payload" {
+	events := parse_sse_contract("data: {\"choices\":[{\"delta\":{\"content\":\"data: keep me\"}}]}\n\n")
+	assert_equal(len(events), 1)
+	assert_equal(events[0]["choices"][0]["delta"]["content"], "data: keep me")
+}
+
+test "normalized stream raw payload is redacted" {
+	client := create_client(openai_provider(), "fixture-key")
+	result := normalize_stream_success(client, 200, [{
+		"id": "stream-1",
+		"Authorization": "Bearer provider-secret",
+		"choices": [{"delta": {"content": "ok"}, "finish_reason": "stop"}]
+	}], "gpt-4.1-mini")
+	assert_equal(contains(to_json(result["raw"]), "provider-secret"), 0)
+}
+
+test "chat fixture honors requested model and request budgets" {
+	client := create_client(openai_provider(), "")
+	messages := [create_message("user", "0123456789")]
+	model_result := chat_completion(client, messages, {"offline_fixture": true, "model": "fixture-override"})
+	assert_true(model_result["ok"])
+	assert_equal(model_result["model"], "fixture-override")
+
+	budget_result := chat_completion(client, messages, {"offline_fixture": true, "max_prompt_characters": 5})
+	assert_false(budget_result["ok"])
+	assert_equal(budget_result["error"]["code"], "request_budget_exceeded")
+}
+
+test "negative retry settings clamp to a single immediate attempt" {
+	client := create_client(openai_provider(), "fixture-key")
+	result := chat_completion(client, [create_message("user", "retry")], {
+		"max_retries": -4,
+		"retry_budget": -2,
+		"transport": func(url, request_options) {
+			return Err("timeout")
+		}
+	})
+	assert_false(result["ok"])
+	assert_equal(result["error"]["code"], "network_error")
+	assert_equal(result["observability"]["start_count"], 1)
+	assert_equal(retry_delay_contract(-1, -100, -5, -1), 0)
+}
+
+test "provider error bodies and invalid success shapes are not normalized as successes" {
+	client := create_client(openai_provider(), "fixture-key")
+	provider_error := chat_completion(client, [create_message("user", "bad")], {
+		"max_retries": 0,
+		"transport": func(url, request_options) {
+			return Ok({"_status": 400, "_body": "{\"error\":{\"message\":\"bad input\",\"code\":\"bad_request\"}}"})
+		}
+	})
+	assert_false(provider_error["ok"])
+	assert_equal(provider_error["error"]["code"], "provider_error")
+	assert_equal(provider_error["error"]["provider_code"], "bad_request")
+
+	invalid_shape := embeddings(client, "bad shape", {
+		"max_retries": 0,
+		"transport": func(url, request_options) {
+			return Ok({"_status": 200, "_body": "[]"})
+		}
+	})
+	assert_false(invalid_shape["ok"])
+	assert_equal(invalid_shape["error"]["code"], "invalid_response")
+}
