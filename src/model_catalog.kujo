@@ -1,0 +1,312 @@
+# Versioned, provider-owned model metadata contracts for deterministic callers.
+
+func dict_get_or(obj, key, default_value) {
+	if type(obj) != "dict" {
+		return default_value
+	}
+	if has_key(obj, key) {
+		return obj[key]
+	}
+	return default_value
+}
+
+func normalized_optional_number(value) {
+	if type(value) == "int" || type(value) == "float" {
+		return value
+	}
+	return null
+}
+
+func normalized_optional_int(value) {
+	if type(value) == "int" {
+		return value
+	}
+	return null
+}
+
+func normalized_bool(value, fallback) {
+	if type(value) == "bool" {
+		return value
+	}
+	return fallback
+}
+
+func normalized_string(value, fallback) {
+	if type(value) == "string" {
+		resolved := trim(value)
+		if resolved != "" {
+			return resolved
+		}
+	}
+	return fallback
+}
+
+func array_contains(values, expected) {
+	for value in values {
+		if value == expected {
+			return true
+		}
+	}
+	return false
+}
+
+func model_catalog_contract_version_impl() {
+	return "1.0.0"
+}
+
+func create_model_metadata_impl(provider_id, model_id, options) {
+	options_map := options
+	if type(options_map) != "dict" {
+		options_map = {}
+	}
+	return {
+		"provider": normalized_string(provider_id, ""),
+		"model": normalized_string(model_id, ""),
+		"quality_tier": normalized_string(dict_get_or(options_map, "quality_tier", "unknown"), "unknown"),
+		"relative_quality": normalized_optional_number(dict_get_or(options_map, "relative_quality", null)),
+		"context_window": normalized_optional_int(dict_get_or(options_map, "context_window", null)),
+		"supports_tools": normalized_bool(dict_get_or(options_map, "supports_tools", false), false),
+		"supports_structured_output": normalized_bool(dict_get_or(options_map, "supports_structured_output", false), false),
+		"input_cost_per_million": normalized_optional_number(dict_get_or(options_map, "input_cost_per_million", null)),
+		"output_cost_per_million": normalized_optional_number(dict_get_or(options_map, "output_cost_per_million", null)),
+		"currency": normalized_string(dict_get_or(options_map, "currency", "USD"), "USD"),
+		"typical_latency_ms": normalized_optional_number(dict_get_or(options_map, "typical_latency_ms", null)),
+		"latency_percentile": normalized_string(dict_get_or(options_map, "latency_percentile", "unknown"), "unknown"),
+		"reliability_score": normalized_optional_number(dict_get_or(options_map, "reliability_score", null)),
+		"enabled": normalized_bool(dict_get_or(options_map, "enabled", true), true),
+		"source": normalized_string(dict_get_or(options_map, "source", "provider"), "provider"),
+		"observed_at": normalized_string(dict_get_or(options_map, "observed_at", ""), ""),
+		"metadata": dict_get_or(options_map, "metadata", {})
+	}
+}
+
+func model_key(entry) {
+	return to_string(dict_get_or(entry, "provider", "")) + "::" + to_string(dict_get_or(entry, "model", ""))
+}
+
+func sort_model_metadata(entries) {
+	result := []
+	for entry in entries {
+		inserted := false
+		updated := []
+		for existing in result {
+			if inserted == false && model_key(entry) < model_key(existing) {
+				updated := push(updated, entry)
+				inserted := true
+			}
+			updated := push(updated, existing)
+		}
+		if inserted == false {
+			updated := push(updated, entry)
+		}
+		result = updated
+	}
+	return result
+}
+
+func validate_model_metadata(entry, index) {
+	errors := []
+	if type(entry) != "dict" {
+		return [{"field": "models[" + to_string(index) + "]", "message": "Model metadata must be a dict."}]
+	}
+	if normalized_string(dict_get_or(entry, "provider", ""), "") == "" {
+		errors := push(errors, {"field": "models[" + to_string(index) + "].provider", "message": "Provider is required."})
+	}
+	if normalized_string(dict_get_or(entry, "model", ""), "") == "" {
+		errors := push(errors, {"field": "models[" + to_string(index) + "].model", "message": "Model is required."})
+	}
+	relative_quality := dict_get_or(entry, "relative_quality", null)
+	if type(relative_quality) != "null" && ((type(relative_quality) != "int" && type(relative_quality) != "float") || relative_quality < 0 || relative_quality > 1) {
+		errors := push(errors, {"field": "models[" + to_string(index) + "].relative_quality", "message": "Relative quality must be between 0 and 1 or null."})
+	}
+	quality_tier := dict_get_or(entry, "quality_tier", "unknown")
+	if array_contains(["unknown", "fixture", "economy", "standard", "premium", "frontier"], quality_tier) == false {
+		errors := push(errors, {"field": "models[" + to_string(index) + "].quality_tier", "message": "Quality tier is not supported."})
+	}
+	context_window := dict_get_or(entry, "context_window", null)
+	if type(context_window) != "null" && (type(context_window) != "int" || context_window <= 0) {
+		errors := push(errors, {"field": "models[" + to_string(index) + "].context_window", "message": "Context window must be a positive integer or null."})
+	}
+	for cost_field in ["input_cost_per_million", "output_cost_per_million", "typical_latency_ms"] {
+		cost_value := dict_get_or(entry, cost_field, null)
+		if type(cost_value) != "null" && ((type(cost_value) != "int" && type(cost_value) != "float") || cost_value < 0) {
+			errors := push(errors, {"field": "models[" + to_string(index) + "]." + cost_field, "message": cost_field + " must be non-negative or null."})
+		}
+	}
+	for boolean_field in ["supports_tools", "supports_structured_output", "enabled"] {
+		if type(dict_get_or(entry, boolean_field, null)) != "bool" {
+			errors := push(errors, {"field": "models[" + to_string(index) + "]." + boolean_field, "message": boolean_field + " must be boolean."})
+		}
+	}
+	reliability := dict_get_or(entry, "reliability_score", null)
+	if type(reliability) != "null" {
+		if (type(reliability) != "int" && type(reliability) != "float") || reliability < 0 || reliability > 1 {
+			errors := push(errors, {"field": "models[" + to_string(index) + "].reliability_score", "message": "Reliability score must be between 0 and 1 or null."})
+		}
+	}
+	return errors
+}
+
+func validate_model_catalog_impl(catalog) {
+	errors := []
+	if type(catalog) != "dict" {
+		return {"ok": false, "errors": [{"field": "catalog", "message": "Model catalog must be a dict."}]}
+	}
+	if normalized_string(dict_get_or(catalog, "id", ""), "") == "" {
+		errors := push(errors, {"field": "id", "message": "Catalog id is required."})
+	}
+	if normalized_string(dict_get_or(catalog, "version", ""), "") == "" {
+		errors := push(errors, {"field": "version", "message": "Catalog version is required."})
+	}
+	models := dict_get_or(catalog, "models", [])
+	if type(models) != "array" {
+		errors := push(errors, {"field": "models", "message": "Catalog models must be an array."})
+		models = []
+	}
+	seen := {}
+	index := 0
+	for entry in models {
+		entry_errors := validate_model_metadata(entry, index)
+		for entry_error in entry_errors {
+			errors := push(errors, entry_error)
+		}
+		key := model_key(entry)
+		if key != "::" {
+			if has_key(seen, key) {
+				errors := push(errors, {"field": "models[" + to_string(index) + "]", "message": "Duplicate provider/model entry: " + key})
+			}
+			seen[key] := true
+		}
+		index = index + 1
+	}
+	provided_hash := normalized_string(dict_get_or(catalog, "catalog_hash", ""), "")
+	if provided_hash != "" && provided_hash != model_catalog_hash_impl(catalog) {
+		errors := push(errors, {"field": "catalog_hash", "message": "Catalog hash does not match canonical catalog content."})
+	}
+	return {"ok": len(errors) == 0, "errors": errors}
+}
+
+func catalog_hash_payload(catalog) {
+	return {
+		"schema_name": dict_get_or(catalog, "schema_name", "ai-sdk-model-catalog"),
+		"schema_version": dict_get_or(catalog, "schema_version", model_catalog_contract_version_impl()),
+		"id": dict_get_or(catalog, "id", ""),
+		"version": dict_get_or(catalog, "version", ""),
+		"models": sort_model_metadata(dict_get_or(catalog, "models", [])),
+		"metadata": dict_get_or(catalog, "metadata", {})
+	}
+}
+
+func model_catalog_hash_impl(catalog) {
+	if type(catalog) != "dict" {
+		return ""
+	}
+	return sha256(to_json(catalog_hash_payload(catalog)))
+}
+
+func create_model_catalog_impl(catalog_id, version, models, metadata) {
+	entries := models
+	if type(entries) != "array" {
+		entries = []
+	}
+	normalized_entries := []
+	for entry in entries {
+		if type(entry) == "dict" {
+			normalized_entries := push(normalized_entries, create_model_metadata_impl(
+				dict_get_or(entry, "provider", ""),
+				dict_get_or(entry, "model", ""),
+				entry
+			))
+		} else {
+			normalized_entries := push(normalized_entries, entry)
+		}
+	}
+	catalog := {
+		"schema_name": "ai-sdk-model-catalog",
+		"schema_version": model_catalog_contract_version_impl(),
+		"id": normalized_string(catalog_id, "default"),
+		"version": normalized_string(version, "1"),
+		"models": sort_model_metadata(normalized_entries),
+		"metadata": metadata
+	}
+	if type(catalog["metadata"]) != "dict" {
+		catalog["metadata"] := {}
+	}
+	catalog["catalog_hash"] := model_catalog_hash_impl(catalog)
+	catalog["validation"] := validate_model_catalog_impl(catalog)
+	return catalog
+}
+
+func provider_model_catalog_impl(catalog_id, version, providers) {
+	models := []
+	provider_items := providers
+	if type(provider_items) != "array" {
+		provider_items = []
+	}
+	for provider in provider_items {
+		if type(provider) == "dict" {
+			provider_name := normalized_string(dict_get_or(provider, "name", ""), "")
+			provider_capabilities := dict_get_or(provider, "capabilities", {})
+			provider_models := dict_get_or(provider, "models", [])
+			if type(provider_models) == "array" && len(provider_models) > 0 {
+				for model_entry in provider_models {
+					if type(model_entry) == "dict" {
+						resolved := {}
+						for model_key_name in keys(model_entry) {
+							resolved[model_key_name] := model_entry[model_key_name]
+						}
+						resolved["provider"] := provider_name
+						if has_key(resolved, "supports_tools") == 0 {
+							resolved["supports_tools"] := dict_get_or(provider_capabilities, "tool_calls", false)
+						}
+						if has_key(resolved, "supports_structured_output") == 0 {
+							resolved["supports_structured_output"] := dict_get_or(provider_capabilities, "json_mode", false)
+						}
+						models := push(models, resolved)
+					}
+				}
+			} else {
+				supported := dict_get_or(provider, "supported_models", [])
+				for model_id in supported {
+					models := push(models, create_model_metadata_impl(provider_name, model_id, {
+						"supports_tools": dict_get_or(provider_capabilities, "tool_calls", false),
+						"supports_structured_output": dict_get_or(provider_capabilities, "json_mode", false),
+						"source": "provider_supported_models"
+					}))
+				}
+			}
+		}
+	}
+	return create_model_catalog_impl(catalog_id, version, models, {"source": "provider_presets"})
+}
+
+func resolve_model_catalog_entry_impl(catalog, provider_id, model_id) {
+	if type(catalog) != "dict" {
+		return {"ok": false, "error": {"code": "invalid_model_catalog", "message": "Model catalog must be a dict."}}
+	}
+	validation := validate_model_catalog_impl(catalog)
+	if validation["ok"] == false {
+		return {"ok": false, "error": {"code": "invalid_model_catalog", "message": "Model catalog validation failed.", "details": validation["errors"]}}
+	}
+	requested_key := normalized_string(provider_id, "") + "::" + normalized_string(model_id, "")
+	for entry in dict_get_or(catalog, "models", []) {
+		if model_key(entry) == requested_key {
+			return {
+				"ok": true,
+				"entry": entry,
+				"catalog_id": dict_get_or(catalog, "id", ""),
+				"catalog_version": dict_get_or(catalog, "version", ""),
+				"catalog_hash": dict_get_or(catalog, "catalog_hash", model_catalog_hash_impl(catalog))
+			}
+		}
+	}
+	return {"ok": false, "error": {"code": "model_not_in_catalog", "message": "No model catalog entry exists for " + requested_key + "."}}
+}
+
+export model_catalog_contract_version := model_catalog_contract_version_impl
+export create_model_metadata := create_model_metadata_impl
+export create_model_catalog := create_model_catalog_impl
+export provider_model_catalog := provider_model_catalog_impl
+export validate_model_catalog := validate_model_catalog_impl
+export model_catalog_hash := model_catalog_hash_impl
+export resolve_model_catalog_entry := resolve_model_catalog_entry_impl

@@ -1,5 +1,6 @@
 from src.providers import openai_provider, openrouter_provider, deepseek_provider
 from src.ai_sdk import resolve_model_preference
+from src.model_catalog import provider_model_catalog, resolve_model_catalog_entry
 
 preference := {
 	"class": "frontier_reasoning",
@@ -11,4 +12,16 @@ print(to_json({
 	"openai": resolve_model_preference(openai_provider(), preference),
 	"openrouter": resolve_model_preference(openrouter_provider(), preference),
 	"deepseek": resolve_model_preference(deepseek_provider(), preference)
+}))
+
+catalog := provider_model_catalog("builtin-providers", "1", [
+	openai_provider(),
+	openrouter_provider(),
+	deepseek_provider()
+])
+print(to_json({
+	"catalog_id": catalog["id"],
+	"catalog_version": catalog["version"],
+	"catalog_hash": catalog["catalog_hash"],
+	"openai_default": resolve_model_catalog_entry(catalog, "openai", "gpt-4.1-mini")
 }))

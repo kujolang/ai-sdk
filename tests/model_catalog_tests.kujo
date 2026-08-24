@@ -1,0 +1,66 @@
+test_setup {
+	from src.providers import openai_provider, openrouter_provider, deepseek_provider
+	from src.model_catalog import model_catalog_contract_version, create_model_metadata, create_model_catalog, provider_model_catalog, validate_model_catalog, model_catalog_hash, resolve_model_catalog_entry
+}
+
+test "model catalog is versioned sorted and hash stable" {
+	entries := [
+		create_model_metadata("openrouter", "model-b", {"quality_tier": "frontier"}),
+		create_model_metadata("openai", "model-a", {"quality_tier": "standard"})
+	]
+	catalog := create_model_catalog("team", "2026-08-24", entries, {"owner": "platform"})
+	assert_true(catalog["validation"]["ok"])
+	assert_equal(catalog["schema_version"], model_catalog_contract_version())
+	assert_equal(catalog["models"][0]["provider"], "openai")
+	assert_equal(catalog["models"][1]["provider"], "openrouter")
+	assert_equal(catalog["catalog_hash"], model_catalog_hash(catalog))
+
+	reordered := create_model_catalog("team", "2026-08-24", [entries[1], entries[0]], {"owner": "platform"})
+	assert_equal(catalog["catalog_hash"], reordered["catalog_hash"])
+}
+
+test "catalog preserves unknown operational metrics as null" {
+	entry := create_model_metadata("openai", "model-a", {})
+	assert_equal(entry["context_window"], null)
+	assert_equal(entry["input_cost_per_million"], null)
+	assert_equal(entry["typical_latency_ms"], null)
+	assert_equal(entry["reliability_score"], null)
+}
+
+test "provider catalog derives capabilities without secrets" {
+	catalog := provider_model_catalog("builtin", "1", [openai_provider(), openrouter_provider(), deepseek_provider()])
+	assert_true(catalog["validation"]["ok"])
+	assert_equal(len(catalog["models"]), 3)
+	resolved := resolve_model_catalog_entry(catalog, "openai", "gpt-4.1-mini")
+	assert_true(resolved["ok"])
+	assert_true(resolved["entry"]["supports_tools"])
+	assert_true(resolved["entry"]["supports_structured_output"])
+	assert_equal(has_key(resolved["entry"], "api_key"), 0)
+}
+
+test "catalog rejects duplicate routes and invalid reliability" {
+	duplicate := create_model_catalog("duplicate", "1", [
+		{"provider": "openai", "model": "same"},
+		{"provider": "openai", "model": "same", "reliability_score": 2.0}
+	], {})
+	validation := validate_model_catalog(duplicate)
+	assert_false(validation["ok"])
+	assert_true(len(validation["errors"]) >= 2)
+}
+
+test "catalog rejects invalid bounded operational metadata" {
+	catalog := create_model_catalog("invalid", "1", [{
+		"provider": "openai", "model": "bad", "quality_tier": "imaginary",
+		"relative_quality": 2.0, "context_window": -1, "input_cost_per_million": -2
+	}], {})
+	validation := validate_model_catalog(catalog)
+	assert_false(validation["ok"])
+	assert_true(len(validation["errors"]) >= 4)
+}
+
+test "catalog lookup returns structured missing result" {
+	catalog := provider_model_catalog("builtin", "1", [openai_provider()])
+	missing := resolve_model_catalog_entry(catalog, "openai", "not-present")
+	assert_false(missing["ok"])
+	assert_equal(missing["error"]["code"], "model_not_in_catalog")
+}

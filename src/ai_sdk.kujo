@@ -38,6 +38,7 @@ func provider_metadata_impl(provider) {
 			"api_key_env": "",
 			"capabilities": {},
 			"model_preferences": {},
+			"models": [],
 			"validation_error": "Invalid provider: expected a provider dict."
 		}
 	}
@@ -60,6 +61,7 @@ func provider_metadata_impl(provider) {
 		"api_key_env": dict_get_or(provider, "api_key_env", ""),
 		"capabilities": capabilities,
 		"model_preferences": dict_get_or(provider, "model_preferences", {}),
+		"models": dict_get_or(provider, "models", []),
 		"validation_error": dict_get_or(provider, "validation_error", "")
 	}
 }

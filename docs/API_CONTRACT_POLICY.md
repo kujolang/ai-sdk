@@ -61,6 +61,11 @@ The following are allowed in MINOR/PATCH releases:
 - new endpoints that do not alter existing endpoint contracts
 - stricter validation that only affects clearly invalid inputs
 - additive provider metadata and standalone resolver contracts such as model-preference resolution, provided existing response fields and semantics remain unchanged
+- additive versioned model-catalog contracts. Catalog entries must preserve unknown operational values as `null`, include provenance supplied by the catalog owner, and remain independent from normalized chat/embedding response versions
+
+## Model Catalog Contract
+
+The standalone `ai-sdk-model-catalog` schema is versioned independently through `model_catalog_contract_version()`. Catalog hashes use deterministic JSON serialization over normalized catalog identity, models, and metadata. Consumers must treat the tuple of catalog ID, catalog version, and catalog hash as routing evidence. Provider presets may publish identity and capability facts, but volatile cost, latency, reliability, and context values must not be invented when unknown.
 
 ## Governance Checklist
 
