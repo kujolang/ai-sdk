@@ -1,0 +1,18 @@
+{
+  "id": "dispatch-default",
+  "version": "1",
+  "models": [
+    {
+      "provider": "openai",
+      "model": "gpt-4.1-mini",
+      "quality_tier": "standard",
+      "supports_tools": true,
+      "supports_structured_output": true,
+      "enabled": true,
+      "source": "operator"
+    }
+  ],
+  "metadata": {
+    "purpose": "Dispatch routing catalog"
+  }
+}

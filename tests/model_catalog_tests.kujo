@@ -1,6 +1,13 @@
 test_setup {
 	from src.providers import openai_provider, openrouter_provider, deepseek_provider
-	from src.model_catalog import model_catalog_contract_version, create_model_metadata, create_model_catalog, provider_model_catalog, validate_model_catalog, model_catalog_hash, resolve_model_catalog_entry
+	from src.model_catalog import model_catalog_contract_version, create_model_metadata, create_model_catalog, create_model_catalog_from_config, provider_model_catalog, validate_model_catalog, model_catalog_hash, resolve_model_catalog_entry
+}
+
+test "catalog authoring config produces a validated deterministic catalog" {
+	result := create_model_catalog_from_config({"id": "dispatch", "version": "1", "models": [{"provider": "openai", "model": "gpt-test", "quality_tier": "standard", "enabled": true}]})
+	assert_equal(result["ok"], true)
+	assert_equal(result["catalog"]["id"], "dispatch")
+	assert_true(trim(result["catalog"]["catalog_hash"]) != "")
 }
 
 test "model catalog is versioned sorted and hash stable" {

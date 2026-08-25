@@ -237,6 +237,15 @@ func create_model_catalog_impl(catalog_id, version, models, metadata) {
 	return catalog
 }
 
+func create_model_catalog_from_config_impl(config) {
+	if type(config) != "dict" {
+		return {"ok": false, "errors": [{"field": "config", "message": "Catalog config must be a dict."}]}
+	}
+	catalog := create_model_catalog_impl(dict_get_or(config, "id", ""), dict_get_or(config, "version", ""), dict_get_or(config, "models", []), dict_get_or(config, "metadata", {}))
+	validation := validate_model_catalog_impl(catalog)
+	return {"ok": validation["ok"], "catalog": catalog, "errors": validation["errors"]}
+}
+
 func provider_model_catalog_impl(catalog_id, version, providers) {
 	models := []
 	provider_items := providers
@@ -306,6 +315,7 @@ func resolve_model_catalog_entry_impl(catalog, provider_id, model_id) {
 export model_catalog_contract_version := model_catalog_contract_version_impl
 export create_model_metadata := create_model_metadata_impl
 export create_model_catalog := create_model_catalog_impl
+export create_model_catalog_from_config := create_model_catalog_from_config_impl
 export provider_model_catalog := provider_model_catalog_impl
 export validate_model_catalog := validate_model_catalog_impl
 export model_catalog_hash := model_catalog_hash_impl

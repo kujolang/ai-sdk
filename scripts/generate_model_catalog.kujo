@@ -1,0 +1,41 @@
+from src.model_catalog import create_model_catalog_from_config
+
+raw_args := args()
+if len(raw_args) < 1 {
+	print("Usage: kujo run scripts/generate_model_catalog.kujo --interpreter -- <config.json> [--output catalog.json]")
+	exit(1)
+}
+
+config_path := raw_args[0]
+output_path := ""
+index := 1
+while index < len(raw_args) {
+	if raw_args[index] == "--output" && index + 1 < len(raw_args) {
+		output_path = raw_args[index + 1]
+		index = index + 2
+		continue
+	}
+	print("Unknown argument: " + to_string(raw_args[index]))
+	exit(1)
+}
+
+body := read_file(config_path)
+config := null
+try {
+	config = parse_json(body)
+} except err {
+	print("Catalog config is not valid JSON: " + config_path)
+	exit(1)
+}
+result := create_model_catalog_from_config(config)
+if result["ok"] == false {
+	print(to_json(result))
+	exit(1)
+}
+rendered := to_json(result["catalog"])
+if output_path != "" {
+	write_file(output_path, rendered + "\n")
+	print(output_path)
+} else {
+	print(rendered)
+}
