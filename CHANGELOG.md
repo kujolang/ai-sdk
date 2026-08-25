@@ -8,6 +8,7 @@ The format is based on Keep a Changelog and this project follows semantic versio
 
 ### Added
 
+- Versioned model-catalog authoring and validation primitives for deterministic orchestrators, plus `scripts/generate_model_catalog.kujo`, a copyable config example, canonical hashing, and duplicate provider/model rejection.
 - Launch-readiness Spec and Eval suite for prelaunch review, with live-provider proof kept external unless credentials are explicitly configured and approved.
 - Provider-owned `resolve_model_preference(provider, preference)` routing with explicit resolution provenance, provider class mappings, overrides, and deterministic fallback behavior.
 - `provider_metadata(provider)` helper returning safe-to-log provider identity and capabilities (never a resolved API key).
