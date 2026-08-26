@@ -1,0 +1,27 @@
+func describe(provider) { return {"id": "fictional-native-v1", "protocol": "fictional", "auth": {"mode": "header", "header": "x-api-key", "allow_anonymous": false}, "capabilities": provider["capabilities"], "models": provider["models"]} }
+func validate(provider) { return {"ok": true, "errors": []} }
+func encode_chat(context) {
+	conversation := []
+	for message in context["messages"] { speaker := "human"; if message["role"] == "assistant" { speaker = "agent" }; if message["role"] == "system" { speaker = "instruction" }; conversation = push(conversation, {"speaker": speaker, "text": message["content"]}) }
+	return {"url": context["provider"]["base_url"] + "/conversation", "method": "POST", "headers": {"x-api-key": context["credential"], "Content-Type": "application/fictional+json"}, "protected_headers": ["x-api-key", "Content-Type"], "body": to_json({"engine": context["resolved_options"]["model"], "conversation": conversation, "streaming": context["resolved_options"]["stream"]}), "stream_mode": context["resolved_options"]["stream"]}
+}
+func decode_chat(context) {
+	d := context["data"]; if type(d) != "dict" || has_key(d, "reply") == 0 { return {"ok": false} }
+	m := {}; if has_key(d, "metrics") { m = d["metrics"] }; input := 0; output := 0; if has_key(m,"input") { input=m["input"] }; if has_key(m,"output") { output=m["output"] }
+	return {"ok": true, "request_id": "fictional-1", "model": context["fallback_model"], "output_text": d["reply"]["text"], "finish_reason": "complete", "tool_calls": [], "usage": {"input_tokens": input, "output_tokens": output, "total_tokens": input+output}, "raw_provider": d}
+}
+func decode_error(context) {
+	d:=context["data"]; if type(d)!="dict" || has_key(d,"failure")==0 { return {"ok":false,"matched":false} }; f:=d["failure"]; return {"ok":false,"matched":true,"category":"provider","message":f["reason"],"provider_code":f["code"],"retry_hint":true,"raw_provider":d}
+}
+func decode_stream(context) {
+	combined:=""; if type(context["chunks"])=="array" { for chunk in context["chunks"] { combined=combined+chunk } } else { combined=context["body_text"] }
+	text:=""; input:=0; output:=0; request_id:=""; finish:="stop"
+	for raw in split(combined,"\n") { if trim(raw)=="" { continue }; parts:=split(raw,"|"); if parts[0]=="piece" { text=text+parts[1] }; if parts[0]=="stats" { input=to_int(parts[1]); output=to_int(parts[2]) }; if parts[0]=="end" { finish=parts[1]; request_id=parts[2] } }
+	return {"ok":true,"request_id":request_id,"model":context["fallback_model"],"output_text":text,"finish_reason":finish,"tool_calls":[],"usage":{"input_tokens":input,"output_tokens":output,"total_tokens":input+output},"raw_provider":{"native_stream":true}}
+}
+func encode_embeddings(context) { return {"url":context["provider"]["base_url"]+"/vectorize","method":"POST","headers":{"x-api-key":context["credential"],"Content-Type":"application/fictional+json"},"protected_headers":["x-api-key","Content-Type"],"body":to_json({"passages":context["input"]}),"stream_mode":false} }
+func decode_embeddings(context) { d:=context["data"]; vectors:=[]; for item in d["vectors"] { vectors=push(vectors,{"index":item["position"],"vector":item["values"]}) }; input:=d["metrics"]["input"]; return {"ok":true,"model":context["fallback_model"],"embeddings":vectors,"usage":{"input_tokens":input,"total_tokens":input},"raw_provider":d} }
+func driver() { return {"contract":"ai-sdk-provider-driver","version":"1.0.0","id":"fictional-native-v1","describe":describe,"validate":validate,"encode_chat":encode_chat,"decode_chat":decode_chat,"decode_error":decode_error,"decode_stream":decode_stream,"encode_embeddings":encode_embeddings,"decode_embeddings":decode_embeddings} }
+func provider() { return {"name":"fictional","base_url":"https://fictional.invalid/v1","chat_path":"/conversation","embeddings_path":"/vectorize","api_key_env":"FICTIONAL_API_KEY","default_model":"fictional-model","supported_models":["fictional-model"],"models":[],"capabilities":{"streaming":true,"tool_calls":true,"json_mode":false,"embeddings":true},"driver":driver()} }
+export fictional_provider_driver := driver
+export fictional_provider := provider

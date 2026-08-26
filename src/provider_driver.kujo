@@ -1,0 +1,54 @@
+from openai_compatible_driver import openai_compatible_driver
+
+func get(obj, key, fallback) { if type(obj) == "dict" && has_key(obj, key) { return obj[key] }; return fallback }
+func contract_version_impl() { return "1.0.0" }
+func issue(field, message) { return {"field": field, "message": message} }
+
+func validate_impl(driver, provider) {
+	errors := []
+	if type(driver) != "dict" { return {"ok": false, "errors": [issue("driver", "Provider driver must be a dict.")]} }
+	if get(driver, "contract", "") != "ai-sdk-provider-driver" { errors = push(errors, issue("contract", "Unsupported provider driver contract.")) }
+	if get(driver, "version", "") != contract_version_impl() { errors = push(errors, issue("version", "Unsupported provider driver contract version.")) }
+	if type(get(driver, "id", "")) != "string" || trim(get(driver, "id", "")) == "" { errors = push(errors, issue("id", "Provider driver id must be non-empty.")) }
+	for hook in ["describe", "validate", "encode_chat", "decode_chat", "decode_error"] { if type(get(driver, hook, null)) != "function" { errors = push(errors, issue(hook, "Driver hook must be a function.")) } }
+	capabilities := get(provider, "capabilities", {})
+	if get(capabilities, "streaming", false) && type(get(driver, "decode_stream", null)) != "function" { errors = push(errors, issue("decode_stream", "Streaming capability requires decode_stream.")) }
+	embeddings := get(capabilities, "embeddings", false) || has_key(driver, "encode_embeddings") || has_key(driver, "decode_embeddings")
+	if embeddings {
+		if type(get(driver, "encode_embeddings", null)) != "function" { errors = push(errors, issue("encode_embeddings", "Embeddings require encode_embeddings.")) }
+		if type(get(driver, "decode_embeddings", null)) != "function" { errors = push(errors, issue("decode_embeddings", "Embeddings require decode_embeddings.")) }
+	}
+	return {"ok": len(errors) == 0, "errors": errors}
+}
+
+func invoke_metadata(driver, provider, hook) {
+	validation := validate_impl(driver, provider)
+	if !validation["ok"] { return validation }
+	value := null
+	err_value := null
+	try { value = driver[hook](provider) } except err { err_value = err }
+	if type(err_value) != "null" { return {"ok": false, "errors": [issue(hook, "Provider driver " + hook + " hook failed.")]} }
+	if hook == "validate" {
+		if type(value) != "dict" || !get(value, "ok", false) { return {"ok": false, "errors": get(value, "errors", [issue("provider", "Driver rejected provider.")])} }
+		return {"ok": true, "errors": []}
+	}
+	if type(value) != "dict" { return {"ok": false, "errors": [issue(hook, "Provider driver " + hook + " hook must return a dict.")]} }
+	return {"ok": true, "description": value, "errors": []}
+}
+
+func resolve_impl(provider) {
+	driver := null
+	source := "provider"
+	if type(provider) == "dict" && has_key(provider, "driver") { driver = provider["driver"] } else { driver = openai_compatible_driver(); source = "legacy_openai_compatible" }
+	valid := invoke_metadata(driver, provider, "validate")
+	if !valid["ok"] { return {"ok": false, "driver": driver, "source": source, "error": "Invalid provider driver.", "errors": valid["errors"]} }
+	described := invoke_metadata(driver, provider, "describe")
+	if !described["ok"] { return {"ok": false, "driver": driver, "source": source, "error": "Invalid provider driver metadata.", "errors": described["errors"]} }
+	return {"ok": true, "driver": driver, "source": source, "description": described["description"], "errors": []}
+}
+
+export provider_driver_contract_version := contract_version_impl
+export validate_provider_driver := validate_impl
+export safe_driver_describe := func(driver, provider) { return invoke_metadata(driver, provider, "describe") }
+export safe_driver_validate := func(driver, provider) { return invoke_metadata(driver, provider, "validate") }
+export resolve_provider_driver := resolve_impl

@@ -3,6 +3,9 @@
 # This module provides a normalized, provider-agnostic contract for
 # OpenAI-compatible chat APIs with retries and capability checks.
 
+from provider_driver import resolve_provider_driver
+from openai_compatible_driver import openai_encode_chat, openai_encode_embeddings
+
 STATE_BACKEND_REGISTRY := {}
 
 func dict_get_or(obj, key, default_value) {
@@ -196,9 +199,12 @@ func create_client_impl(provider, api_key_override) {
 		}
 	}
 
+	driver_resolution := resolve_provider_driver(provider)
+	if !driver_resolution["ok"] { config_error = driver_resolution["error"] }
+
 	api_key := api_key_override
 	if type(api_key) == "null" {
-		api_key := env(provider["api_key_env"])
+		api_key := env(dict_get_or(provider, "api_key_env", ""))
 	}
 	if type(api_key) == "null" {
 		api_key := ""
@@ -208,6 +214,9 @@ func create_client_impl(provider, api_key_override) {
 		"provider": provider,
 		"api_key": api_key,
 		"config_error": config_error,
+		"driver": driver_resolution["driver"],
+		"driver_source": driver_resolution["source"],
+		"driver_description": dict_get_or(driver_resolution, "description", {}),
 		"transport": dict_get_or(provider, "transport", null),
 		"in_flight_requests": 0,
 		"circuit_breaker_consecutive_failures": 0,
@@ -1590,31 +1599,115 @@ func normalize_embeddings_success_response(client, status_code, data, fallback_m
 	}
 }
 
-func build_embeddings_request_context(client, payload, options, resolved_options) {
-	headers := {
-		"Authorization": "Bearer " + client["api_key"],
-		"Content-Type": "application/json"
+func driver_hook(client, hook_name, context) {
+	driver := dict_get_or(client, "driver", {})
+	if type(dict_get_or(driver, hook_name, null)) != "function" { return {"ok": false, "error": "Provider driver is missing hook: " + hook_name + "."} }
+	value := null
+	err_value := null
+	try {
+		if dict_get_or(driver, "id", "") == "openai-compatible" {
+			if hook_name == "encode_chat" { value = openai_encode_chat(context) }
+			if hook_name == "encode_embeddings" { value = openai_encode_embeddings(context) }
+		} else { value = driver[hook_name](context) }
+	} except err { err_value = err }
+	if type(err_value) != "null" { return {"ok": false, "error": "Provider driver hook failed: " + hook_name + "."} }
+	return {"ok": true, "value": value}
+}
+
+func contains_ci(values, candidate) {
+	if type(values) != "array" { return false }
+	for value in values { if type(value) == "string" && lower(value) == lower(candidate) { return true } }
+	return false
+}
+
+func validate_driver_descriptor(client, descriptor, operation) {
+	if type(descriptor) != "dict" { return {"ok": false, "code": "config_error", "message": "Provider driver request descriptor must be a dict."} }
+	url := dict_get_or(descriptor, "url", "")
+	if type(url) != "string" || url == "" { return {"ok": false, "code": "config_error", "message": "Provider driver request descriptor requires a URL."} }
+	if contains(url, "@") || contains(url, "?") || contains(url, "#") { return {"ok": false, "code": "endpoint_policy_violation", "message": "Provider driver URL contains forbidden credentials, query, or fragment data."} }
+	provider := client["provider"]
+	if provider_host_from_base_url(url) != provider_host_from_base_url(provider["base_url"]) { return {"ok": false, "code": "endpoint_policy_violation", "message": "Provider driver URL host must match configured provider host."} }
+	secure := starts_with(lower(url), "https://")
+	local_http := dict_get_or(provider, "allow_insecure_localhost", false) && starts_with(lower(url), "http://") && (provider_host_from_base_url(url) == "localhost" || provider_host_from_base_url(url) == "127.0.0.1")
+	if !secure && !local_http { return {"ok": false, "code": "endpoint_policy_violation", "message": "Provider driver URL must use HTTPS unless opted-in localhost HTTP is configured."} }
+	if dict_get_or(descriptor, "method", "") != "POST" || type(dict_get_or(descriptor, "headers", null)) != "dict" || type(dict_get_or(descriptor, "body", null)) != "string" || type(dict_get_or(descriptor, "stream_mode", false)) != "bool" { return {"ok": false, "code": "config_error", "message": "Malformed provider driver request descriptor."} }
+	if operation == "embeddings" && descriptor["stream_mode"] { return {"ok": false, "code": "config_error", "message": "Embeddings request cannot stream."} }
+	protected := dict_get_or(descriptor, "protected_headers", [])
+	if type(protected) != "array" { return {"ok": false, "code": "config_error", "message": "protected_headers must be an array."} }
+	for name in keys(descriptor["headers"]) { if header_entry_has_injection_risk(name, descriptor["headers"][name]) { return {"ok": false, "code": "config_error", "message": "Provider driver headers contain control characters."} } }
+	credential := client["api_key"]
+	if type(credential) == "string" && len(credential) > 3 {
+		if contains(url, credential) || contains(descriptor["body"], credential) { return {"ok": false, "code": "endpoint_policy_violation", "message": "Provider driver exposed credentials outside protected headers."} }
+		for name in keys(descriptor["headers"]) { value := descriptor["headers"][name]; if type(value) == "string" && contains(value, credential) && !contains_ci(protected, name) && !is_protected_header_name(name) { return {"ok": false, "code": "endpoint_policy_violation", "message": "Provider driver placed credentials in an unprotected header."} } }
 	}
+	return {"ok": true}
+}
+
+func build_driver_request_context(client, payload, options, resolved_options, operation, messages, input_value) {
+	hook := "encode_chat"
+	if operation == "embeddings" { hook = "encode_embeddings" }
+	encoded := driver_hook(client, hook, {"operation": operation, "provider": client["provider"], "credential": client["api_key"], "payload": payload, "messages": messages, "input": input_value, "options": options, "resolved_options": resolved_options})
+	if !encoded["ok"] { return {"error": standard_error_response_impl(client, "config_error", encoded["error"], 0, null, false)} }
+	descriptor := encoded["value"]
+	checked := validate_driver_descriptor(client, descriptor, operation)
+	if !checked["ok"] { return {"error": standard_error_response_impl(client, checked["code"], checked["message"], 0, null, false)} }
+	headers := descriptor["headers"]
 	extra_headers := null
 	allow_protected_header_override := false
 	if type(options) == "dict" {
 		extra_headers := dict_get_or(options, "headers", null)
 		allow_protected_header_override := resolved_options["allow_unsafe_header_override"]
 	}
+	if !allow_protected_header_override && type(extra_headers) == "dict" {
+		filtered := {}
+		for name in keys(extra_headers) { if !contains_ci(descriptor["protected_headers"], name) { filtered[name] = extra_headers[name] } }
+		extra_headers = filtered
+	}
 	headers := merge_headers_with_policy(headers, extra_headers, allow_protected_header_override)
-
-	embeddings_path := dict_get_or(client["provider"], "embeddings_path", "/embeddings")
-	url := client["provider"]["base_url"] + embeddings_path
 
 	return {
 		"headers": headers,
-		"url": url,
+		"url": descriptor["url"],
 		"timeout": resolved_options["timeout"],
 		"connect_timeout": resolved_options["connect_timeout"],
 		"read_timeout": resolved_options["read_timeout"],
-		"body": to_json(payload),
+		"body": descriptor["body"],
+		"stream_mode": descriptor["stream_mode"],
 		"transport": resolve_transport_with_resolved(client, resolved_options)
 	}
+}
+
+func build_embeddings_request_context(client, payload, options, resolved_options) { return build_driver_request_context(client, payload, options, resolved_options, "embeddings", [], null) }
+
+func semantic_chat_result(client, status_code, value) {
+	if type(value) != "dict" || !dict_get_or(value, "ok", false) || type(dict_get_or(value, "output_text", null)) != "string" || type(dict_get_or(value, "tool_calls", null)) != "array" || type(dict_get_or(value, "usage", null)) != "dict" { return standard_error_response_impl(client, "invalid_response", "Provider driver returned a malformed chat semantic result.", status_code, null, false) }
+	return {"ok": true, "provider": client["provider"]["name"], "contract_version": contract_version_value(), "request_id": dict_get_or(value, "request_id", ""), "model": dict_get_or(value, "model", client["provider"]["default_model"]), "output_text": value["output_text"], "finish_reason": dict_get_or(value, "finish_reason", ""), "tool_calls": value["tool_calls"], "usage": value["usage"], "status_code": status_code, "normalized_at": current_timestamp(), "raw": redact_sensitive_payload(dict_get_or(value, "raw_provider", null))}
+}
+
+func semantic_embeddings_result(client, status_code, value) {
+	if type(value) != "dict" || !dict_get_or(value, "ok", false) || type(dict_get_or(value, "embeddings", null)) != "array" || type(dict_get_or(value, "usage", null)) != "dict" { return standard_error_response_impl(client, "invalid_response", "Provider driver returned a malformed embeddings semantic result.", status_code, null, false) }
+	return {"ok": true, "provider": client["provider"]["name"], "contract_version": contract_version_value(), "model": dict_get_or(value, "model", client["provider"]["default_model"]), "embeddings": value["embeddings"], "usage": value["usage"], "status_code": status_code, "normalized_at": current_timestamp(), "raw": redact_sensitive_payload(dict_get_or(value, "raw_provider", null))}
+}
+
+func driver_error_result(client, status_code, response, body_text) {
+	if dict_get_or(client["driver"], "id", "") == "openai-compatible" { return normalize_http_failure_response(client, status_code, response, body_text) }
+	parsed := parse_json_safe(body_text)
+	data := null
+	if parsed["ok"] { data = parsed["data"] }
+	decoded := driver_hook(client, "decode_error", {"status_code": status_code, "response": response, "body_text": body_text, "data": data})
+	if !decoded["ok"] { return standard_error_response_impl(client, "invalid_response", decoded["error"], status_code, null, false) }
+	value := decoded["value"]
+	if type(value) != "dict" || !dict_get_or(value, "matched", false) { return normalize_http_failure_response(client, status_code, response, body_text) }
+	code := "provider_error"
+	if dict_get_or(value, "category", "") == "auth" { code = "auth_error" }
+	if dict_get_or(value, "category", "") == "http" { code = "http_error" }
+	retryable := is_retryable_http_status(status_code)
+	if code == "auth_error" { retryable = false }
+	result := standard_error_response_impl(client, code, dict_get_or(value, "message", "Provider returned an error"), status_code, dict_get_or(value, "raw_provider", data), retryable)
+	error_payload := result["error"]
+	for key in ["type", "param", "provider_code"] { if dict_get_or(value, key, "") != "" { error_payload[key] = value[key] } }
+	result["error"] := error_payload
+	return result
 }
 
 func execute_embeddings_request_once(client, payload, resolved_options, attempt, deadline_ms, trace_id, request_context) {
@@ -1674,7 +1767,7 @@ func execute_embeddings_request_once(client, payload, resolved_options, attempt,
 			}
 
 			if status_code < 200 || status_code > 299 {
-				result := normalize_http_failure_response(client, status_code, response, body_text)
+				result := driver_error_result(client, status_code, response, body_text)
 				return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
 			}
 
@@ -1702,7 +1795,11 @@ func execute_embeddings_request_once(client, payload, resolved_options, attempt,
 				return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
 			}
 
-			result := normalize_embeddings_success_response(client, status_code, data, payload["model"])
+			result := null
+			if dict_get_or(client["driver"], "id", "") == "openai-compatible" { result = normalize_embeddings_success_response(client, status_code, data, payload["model"]) } else {
+				decoded := driver_hook(client, "decode_embeddings", {"status_code": status_code, "data": data, "body_text": body_text, "fallback_model": payload["model"]})
+				if decoded["ok"] { result = semantic_embeddings_result(client, status_code, decoded["value"]) } else { result = standard_error_response_impl(client, "invalid_response", decoded["error"], status_code, null, false) }
+			}
 			return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
 		}
 		case Err(error): {
@@ -1853,6 +1950,7 @@ func embeddings_impl(client, input_value, options) {
 		missing_key := true
 	}
 
+	if missing_key && dict_get_or(dict_get_or(dict_get_or(client, "driver_description", {}), "auth", {}), "allow_anonymous", false) { missing_key = false }
 	if missing_key {
 		return standard_error_response_impl(
 			client,
@@ -1870,6 +1968,7 @@ func embeddings_impl(client, input_value, options) {
 	}
 
 	request_context := build_embeddings_request_context(client, payload, options, resolved_options)
+	if has_key(request_context, "error") { return request_context["error"] }
 
 	max_retries := resolved_options["max_retries"]
 	if max_retries < 0 {
@@ -2734,29 +2833,7 @@ func finalize_chat_completion_result(client, result, start_count, complete_count
 }
 
 func build_chat_request_context(client, payload, options, resolved_options) {
-	headers := {
-		"Authorization": "Bearer " + client["api_key"],
-		"Content-Type": "application/json"
-	}
-	extra_headers := null
-	allow_protected_header_override := false
-	if type(options) == "dict" {
-		extra_headers := dict_get_or(options, "headers", null)
-		allow_protected_header_override := resolved_options["allow_unsafe_header_override"]
-	}
-	headers := merge_headers_with_policy(headers, extra_headers, allow_protected_header_override)
-
-	url := client["provider"]["base_url"] + client["provider"]["chat_path"]
-
-	return {
-		"headers": headers,
-		"url": url,
-		"timeout": resolved_options["timeout"],
-		"connect_timeout": resolved_options["connect_timeout"],
-		"read_timeout": resolved_options["read_timeout"],
-		"body": to_json(payload),
-		"transport": resolve_transport_with_resolved(client, resolved_options)
-	}
+	return build_driver_request_context(client, payload, options, resolved_options, "chat", dict_get_or(payload, "messages", []), null)
 }
 
 func execute_request_once(client, messages, options, resolved_options, payload, budget_error, attempt, deadline_ms, trace_id, request_context) {
@@ -2854,13 +2931,27 @@ func execute_request_once(client, messages, options, resolved_options, payload, 
 			}
 
 			if status_code < 200 || status_code > 299 {
-				result := normalize_http_failure_response(client, status_code, response, body_text)
+				result := driver_error_result(client, status_code, response, body_text)
 				return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
 			}
 
 			if stream_requested {
 				stream_events := []
 				stream_chunks := dict_get_or(response, "_stream_chunks", dict_get_or(response, "stream_chunks", null))
+				if type(stream_chunks) == "array" {
+					total_chunk_bytes := 0
+					for chunk in stream_chunks { if type(chunk) == "string" { total_chunk_bytes = total_chunk_bytes + len(chunk) } }
+					limit := dict_get_or(resolved_options, "max_raw_response_bytes", 0)
+					if limit > 0 && total_chunk_bytes > limit { result := standard_error_response_impl(client, "response_too_large", "Provider stream exceeded max_raw_response_bytes guardrail.", status_code, {"response_bytes": total_chunk_bytes, "max_raw_response_bytes": limit}, false); return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id) }
+				}
+				if dict_get_or(client["driver"], "id", "") != "openai-compatible" {
+					decoded := driver_hook(client, "decode_stream", {"status_code": status_code, "response": response, "body_text": body_text, "chunks": stream_chunks, "fallback_model": payload["model"]})
+					result := null
+					if decoded["ok"] { result = semantic_chat_result(client, status_code, decoded["value"]) } else { result = standard_error_response_impl(client, "invalid_response", decoded["error"], status_code, null, false) }
+					result = enforce_structured_output_contract(client, result, resolved_options)
+					result = apply_governance_post_response(client, result, messages, payload, resolved_options)
+					return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
+				}
 				if type(stream_chunks) == "array" {
 					stream_events := parse_sse_chunks(stream_chunks)
 				}
@@ -2899,7 +2990,11 @@ func execute_request_once(client, messages, options, resolved_options, payload, 
 				return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
 			}
 
-			result := normalize_success_response(client, status_code, data, payload["model"])
+			result := null
+			if dict_get_or(client["driver"], "id", "") == "openai-compatible" { result = normalize_success_response(client, status_code, data, payload["model"]) } else {
+				decoded := driver_hook(client, "decode_chat", {"status_code": status_code, "data": data, "body_text": body_text, "fallback_model": payload["model"]})
+				if decoded["ok"] { result = semantic_chat_result(client, status_code, decoded["value"]) } else { result = standard_error_response_impl(client, "invalid_response", decoded["error"], status_code, null, false) }
+			}
 			result := enforce_structured_output_contract(client, result, resolved_options)
 			result := apply_governance_post_response(client, result, messages, payload, resolved_options)
 			return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
@@ -3070,6 +3165,7 @@ func chat_completion_impl(client, messages, options) {
 		missing_key := true
 	}
 
+	if missing_key && dict_get_or(dict_get_or(dict_get_or(client, "driver_description", {}), "auth", {}), "allow_anonymous", false) { missing_key = false }
 	if missing_key {
 		return standard_error_response_impl(
 			client,
@@ -3206,6 +3302,7 @@ func chat_completion_impl(client, messages, options) {
 	prepared_payload := build_chat_payload_with_resolved(client, messages, options, resolved_options)
 	prepared_budget_error := enforce_request_budgets(client, messages, prepared_payload, resolved_options)
 	request_context := build_chat_request_context(client, prepared_payload, options, resolved_options)
+	if has_key(request_context, "error") { return request_context["error"] }
 
 	attempt := 0
 	while attempt <= max_retries {

@@ -1,0 +1,48 @@
+# Built-in wire adapter for the SDK's legacy OpenAI-compatible protocol.
+# Hooks are descriptor/semantic functions only; they never perform I/O.
+
+func describe_impl(provider) {
+	capabilities := {}; models := []
+	if has_key(provider, "capabilities") { capabilities = provider["capabilities"] }
+	if has_key(provider, "models") { models = provider["models"] }
+	return {"id": "openai-compatible", "protocol": "openai-chat-completions", "auth": {"mode": "bearer", "allow_anonymous": false}, "capabilities": capabilities, "models": models}
+}
+
+func validate_impl(provider) {
+	if type(provider) != "dict" { return {"ok": false, "errors": [{"field": "provider", "message": "Provider must be a dict."}]} }
+	return {"ok": true, "errors": []}
+}
+
+func encode_chat_impl(context) {
+	provider := context["provider"]
+	return {"url": provider["base_url"] + provider["chat_path"], "method": "POST", "headers": {"Authorization": "Bearer " + context["credential"], "Content-Type": "application/json"}, "protected_headers": ["Authorization", "Content-Type"], "body": to_json(context["payload"]), "stream_mode": context["resolved_options"]["stream"]}
+}
+
+func encode_embeddings_impl(context) {
+	provider := context["provider"]
+	path := "/embeddings"
+	if has_key(provider, "embeddings_path") { path = provider["embeddings_path"] }
+	return {"url": provider["base_url"] + path, "method": "POST", "headers": {"Authorization": "Bearer " + context["credential"], "Content-Type": "application/json"}, "protected_headers": ["Authorization", "Content-Type"], "body": to_json(context["payload"]), "stream_mode": false}
+}
+
+func get(obj,key,fallback) { if type(obj)=="dict" && has_key(obj,key) {return obj[key]}; return fallback }
+func usage(data) { raw:=get(data,"usage",{}); input:=get(raw,"prompt_tokens",get(raw,"input_tokens",0)); output:=get(raw,"completion_tokens",get(raw,"output_tokens",0)); total:=get(raw,"total_tokens",input+output); return {"input_tokens":input,"output_tokens":output,"total_tokens":total} }
+func content_text(value) { if type(value)=="string" {return value}; if type(value)=="array" { text:=""; for part in value { if type(part)=="string" {text=text+part} else {text=text+get(part,"text",get(part,"content",""))} }; return text }; return "" }
+func decode_chat_impl(context) { d:=context["data"]; choices:=[]; if type(d)=="dict" && has_key(d,"choices") {choices=d["choices"]}; if type(choices)!="array" || len(choices)==0 {return {"ok":false}}; choice:=choices[0]; message:={}; if has_key(choice,"message") {message=choice["message"]}; value:=""; if has_key(message,"content") {value=message["content"]} else {if has_key(choice,"text") {value=choice["text"]}}; text:=""; if type(value)=="string" {text=value}; if type(value)=="array" {for part in value {if type(part)=="string" {text=text+part} else {if has_key(part,"text") {text=text+part["text"]}}}}; raw_usage:={}; if has_key(d,"usage") {raw_usage=d["usage"]}; input:=0;output:=0;total:=0;if has_key(raw_usage,"prompt_tokens"){input=raw_usage["prompt_tokens"]}else{if has_key(raw_usage,"input_tokens"){input=raw_usage["input_tokens"]}};if has_key(raw_usage,"completion_tokens"){output=raw_usage["completion_tokens"]}else{if has_key(raw_usage,"output_tokens"){output=raw_usage["output_tokens"]}};if has_key(raw_usage,"total_tokens"){total=raw_usage["total_tokens"]}else{total=input+output}; request_id:="";model:=context["fallback_model"];finish:="";tools:=[];if has_key(d,"id"){request_id=d["id"]};if has_key(d,"model"){model=d["model"]};if has_key(choice,"finish_reason"){finish=choice["finish_reason"]};if has_key(message,"tool_calls"){tools=message["tool_calls"]}; return {"ok":true,"request_id":request_id,"model":model,"output_text":text,"finish_reason":finish,"tool_calls":tools,"usage":{"input_tokens":input,"output_tokens":output,"total_tokens":total},"raw_provider":d} }
+func decode_embeddings_impl(context) { d:=context["data"]; data:=[];if has_key(d,"data"){data=d["data"]}; values:=[];i:=0;for item in data {index:=i;vector:=[];if has_key(item,"index"){index=item["index"]};if has_key(item,"embedding"){vector=item["embedding"]};values=push(values,{"index":index,"vector":vector});i=i+1};raw_usage:={};if has_key(d,"usage"){raw_usage=d["usage"]};input:=0;total:=0;if has_key(raw_usage,"prompt_tokens"){input=raw_usage["prompt_tokens"]}else{if has_key(raw_usage,"input_tokens"){input=raw_usage["input_tokens"]}};if has_key(raw_usage,"total_tokens"){total=raw_usage["total_tokens"]}else{total=input};model:=context["fallback_model"];if has_key(d,"model"){model=d["model"]};return {"ok":true,"model":model,"embeddings":values,"usage":{"input_tokens":input,"total_tokens":total},"raw_provider":d} }
+func decode_error_impl(context) { d:=context["data"]; if type(d)!="dict" || has_key(d,"error")==0 {return {"ok":false,"matched":false}}; e:=d["error"]; if type(e)!="dict" {return {"ok":false,"matched":true,"category":"provider","message":"Provider returned an error","raw_provider":d}};message:="Provider returned an error";error_type:="";param:="";code:="";if has_key(e,"message"){message=e["message"]};if has_key(e,"type"){error_type=e["type"]};if has_key(e,"param"){param=e["param"]};if has_key(e,"code"){code=e["code"]};return {"ok":false,"matched":true,"category":"provider","message":message,"type":error_type,"param":param,"provider_code":code,"raw_provider":d} }
+func decode_stream_impl(context) { combined:=context["body_text"];if type(context["chunks"])=="array"{combined="";for c in context["chunks"]{combined=combined+c}};text:="";model:=context["fallback_model"];request_id:="";finish:="stop";final_usage:={"input_tokens":0,"output_tokens":0,"total_tokens":0};events:=[];for raw_line in split(combined,"\n"){line:=trim(raw_line);if !starts_with(line,"data:"){continue};payload:=trim(substring(line,5,len(line)));if payload=="[DONE]"{continue};d:=null;try{d=parse_json(payload)}except err{d=null};if type(d)!="dict"{continue};events=push(events,d);if request_id==""&&has_key(d,"id"){request_id=d["id"]};if has_key(d,"model"){model=d["model"]};choices:=[];if has_key(d,"choices"){choices=d["choices"]};if type(choices)=="array"&&len(choices)>0{choice:=choices[0];delta:={};if has_key(choice,"delta"){delta=choice["delta"]};if has_key(delta,"content"){content:=delta["content"];if type(content)=="string"{text=text+content}};if has_key(choice,"finish_reason")&&choice["finish_reason"]!=""{finish=choice["finish_reason"]}};if has_key(d,"usage"){u:=d["usage"];input:=0;output:=0;total:=0;if has_key(u,"prompt_tokens"){input=u["prompt_tokens"]};if has_key(u,"completion_tokens"){output=u["completion_tokens"]};if has_key(u,"input_tokens"){input=u["input_tokens"]};if has_key(u,"output_tokens"){output=u["output_tokens"]};if has_key(u,"total_tokens"){total=u["total_tokens"]}else{total=input+output};final_usage={"input_tokens":input,"output_tokens":output,"total_tokens":total}}};return {"ok":true,"request_id":request_id,"model":model,"output_text":text,"finish_reason":finish,"tool_calls":[],"usage":final_usage,"raw_provider":{"stream_mode":true,"stream_events":events,"model":model,"id":request_id}} }
+
+func driver_impl() {
+	return {"contract": "ai-sdk-provider-driver", "version": "1.0.0", "id": "openai-compatible", "describe": describe_impl, "validate": validate_impl, "encode_chat": encode_chat_impl, "decode_chat": decode_chat_impl, "encode_embeddings": encode_embeddings_impl, "decode_embeddings": decode_embeddings_impl, "decode_stream": decode_stream_impl, "decode_error": decode_error_impl}
+}
+
+export openai_compatible_driver := driver_impl
+export openai_describe := describe_impl
+export openai_validate := validate_impl
+export openai_encode_chat := encode_chat_impl
+export openai_encode_embeddings := encode_embeddings_impl
+export openai_decode_chat := decode_chat_impl
+export openai_decode_embeddings := decode_embeddings_impl
+export openai_decode_stream := decode_stream_impl
+export openai_decode_error := decode_error_impl

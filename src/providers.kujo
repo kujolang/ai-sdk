@@ -105,6 +105,7 @@ func custom_openai_compatible_provider_with_options_impl(base_url, api_key_env, 
 		"chat_path": "/chat/completions",
 		"api_key_env": api_key_env,
 		"default_model": default_model,
+		"allow_insecure_localhost": allow_insecure_localhost,
 		"supported_models": [default_model],
 		"models": [{
 			"model": default_model,

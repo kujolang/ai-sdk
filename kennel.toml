@@ -40,6 +40,8 @@ stress = "./kujo run scripts/stress_harness.kujo --interpreter"
 [package.exports]
 core = "src/ai_sdk.kujo"
 providers = "src/providers.kujo"
+driver = "src/provider_driver.kujo"
+openai_compatible_driver = "src/openai_compatible_driver.kujo"
 
 [package.metadata]
 contract_tests = "tests/sdk_contract_tests.kujo"
