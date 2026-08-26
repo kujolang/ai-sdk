@@ -1,5 +1,9 @@
 # API Contract Versioning and Deprecation Policy
 
+## Provider-driver contract
+
+The provider-driver extension contract is independently versioned as `1.0.0`. Its version does not change the normalized response contract (`1.0.0`) or model-catalog contract (`1.0.0`). Provider-native wire changes are additive only when existing factories, exports, transport calls, normalized fields, errors, and stream events remain stable.
+
 ## Purpose
 
 This document defines how the AI SDK response contract evolves over time and how deprecations are announced and removed.

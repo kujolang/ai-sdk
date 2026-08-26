@@ -1,5 +1,11 @@
 # Provider Compatibility Matrix
 
+| Provider path | Driver | Auth/wire | Compatibility |
+|---|---|---|---|
+| OpenAI, OpenRouter, DeepSeek | implicit built-in | Bearer + OpenAI-compatible | Preserved |
+| Custom OpenAI-compatible | implicit built-in | Bearer + configured base URL | Preserved |
+| Native external package | explicit provider-contained driver | Driver-specific | Driver contract 1.0.0 |
+
 This matrix summarizes SDK-level capability expectations for built-in provider presets and custom OpenAI-compatible endpoints.
 
 ## Capability Matrix

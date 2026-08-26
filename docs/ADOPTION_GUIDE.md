@@ -1,5 +1,7 @@
 # AI SDK Adoption Guide
 
+Existing applications require no migration. A provider dictionary without `driver` continues through the built-in OpenAI-compatible adapter. Select a native driver package only when its wire protocol differs; application-facing response, error, streaming, transport, governance, and observability contracts remain unchanged.
+
 This guide maps AI SDK features to the operational concerns an enterprise
 evaluator cares about. It is written so a reviewer can quickly see how Kujo
 language features turn into real, testable operational value — and so a new

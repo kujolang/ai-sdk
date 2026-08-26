@@ -1,5 +1,13 @@
 # Provider Extension Guide
 
+## Native provider drivers
+
+A driver has `contract: "ai-sdk-provider-driver"`, `version: "1.0.0"`, a non-empty `id`, and required `describe`, `validate`, `encode_chat`, `decode_chat`, and `decode_error` functions. Streaming requires `decode_stream`; embeddings require paired `encode_embeddings` and `decode_embeddings` hooks.
+
+Encode hooks receive operation, provider, scoped credential, normalized payload/messages/input, raw options, and resolved options. They return `{url, method:"POST", headers, protected_headers, body, stream_mode}` and perform no I/O. Decode hooks receive bounded status/body/data/chunks and return semantic values. Core validates descriptors and semantic results and remains authoritative for public errors and retryability.
+
+External packages import only the public `driver` and, when useful, `openai_compatible_driver` Kennel exports. Conformance requires deterministic offline and malicious-descriptor tests plus the full release gate.
+
 This guide explains how to add a new provider preset and validate capability behavior in the AI SDK.
 
 ## 1) Add a Provider Preset

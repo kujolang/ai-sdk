@@ -1,5 +1,9 @@
 # Operational Profile and Incident Runbook
 
+## Driver trust boundary
+
+Treat external driver packages as executable dependencies. Review and pin them and run conformance/security tests. Core validates host/scheme, protected headers, control characters, credential placement, descriptor shape, response size, semantic results, and retry policy. Drivers cannot select transport or perform I/O. Query authentication and signing remain future work; current descriptors reject query strings.
+
 ## Operational Profile
 
 Use these defaults as a starting point for latency-sensitive, high-reliability deployments.

@@ -1,5 +1,7 @@
 # Telemetry Interoperability Guide
 
+Driver adoption does not change hook payloads or normalized telemetry fields. Drivers may provide secret-free identity/protocol metadata, but credentials and unredacted native payloads must not be surfaced through descriptions, hooks, logs, or model metadata. Core remains responsible for redaction and observability lifecycle.
+
 ## Purpose
 
 This guide shows how to map AI SDK lifecycle hooks to common observability systems, including OpenTelemetry-style traces and metrics.

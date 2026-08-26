@@ -1,5 +1,7 @@
 # Build Your First Provider
 
+Use the existing custom OpenAI-compatible factory when the service accepts OpenAI Chat Completions and embeddings shapes. Use a native driver only when authentication, request, response, error, or stream formats differ. A native package returns the ordinary provider dictionary with a `driver` field; applications still call the existing AI SDK functions unchanged.
+
 Any OpenAI-compatible chat/embeddings endpoint can be wired up in a few lines.
 This walkthrough takes you from `custom_openai_compatible_provider(...)` to a
 validated, fixture-tested, optionally live-smoked provider.

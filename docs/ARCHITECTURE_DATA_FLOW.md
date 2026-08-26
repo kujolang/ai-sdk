@@ -1,5 +1,19 @@
 # AI SDK Architecture and Data Flow
 
+```mermaid
+flowchart LR
+  A[Application] --> C[AI SDK core]
+  C --> D[Provider driver]
+  D --> R[Bounded request descriptor]
+  R --> S[Core security validation]
+  S --> T[Existing transport]
+  T --> D2[Driver decoder]
+  D2 --> N[Semantic result]
+  N --> C2[Core normalized contract]
+```
+
+Drivers own provider-native endpoints, authentication representation, bodies, response/error extraction, and stream framing. Core owns validation, credentials, URL/header policy, transport, response limits, retries, deadlines, breakers, fallbacks, governance, concurrency, state, hooks, redaction, and final result construction. Providers without a driver resolve to the built-in OpenAI-compatible adapter.
+
 This document explains how requests move through AI SDK and where reliability, safety, and normalization controls are applied.
 
 ## System Components
