@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-The two independent provider references—Ollama and Anthropic—were converted into one normative, provider-flexible Contract v1. The contract standardizes architecture, driver boundaries, capability honesty, security, deterministic testing, Kennel distribution, clean-room validation, installed consumer proof, documentation, and release evidence without standardizing provider APIs.
+The two independent provider references—Ollama and Anthropic—were converted into one normative, provider-flexible Contract v1. The contract standardizes architecture, driver boundaries, capability honesty, security, deterministic testing, Kennel distribution, clean-room validation, installed consumer proof, documentation, and release evidence without standardizing provider APIs. A patch clarification (`1.0.1`) records Kujo's lockfile-driven discovery of installed Kennel roots.
 
 ## Evidence Reviewed
 
@@ -39,7 +39,7 @@ Ollama-specific rules are localhost allowance, optional auth, NDJSON, `/api` mod
 
 ## Platform Requirements
 
-Current Kujo runtime consumers require explicit installed package roots in `KUJO_MODULE_PATH`; package-root shims must explicitly export imported symbols. Both references prove this behavior. The contract documents it as platform debt and does not add provider-specific workarounds. Kennel and AI SDK were not modified for this mission.
+Current Kujo runtime consumers discover installed package roots from the nearest `kennel.lock`; package-root shims must still explicitly export imported symbols. Both references now validate this behavior without manual path wiring. `KUJO_MODULE_PATH` remains an explicit extension point. Kennel and AI SDK provider source were not modified for this platform change.
 
 ## Security Requirements
 

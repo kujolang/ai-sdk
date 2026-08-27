@@ -1,6 +1,6 @@
 # Kujo Provider Package Contract v1 Conformance
 
-Contract under review: [`KUJO_PROVIDER_PACKAGE_CONTRACT_V1.md`](KUJO_PROVIDER_PACKAGE_CONTRACT_V1.md)  
+Contract under review: [`KUJO_PROVIDER_PACKAGE_CONTRACT_V1.md`](KUJO_PROVIDER_PACKAGE_CONTRACT_V1.md), version `1.0.1`
 Evidence reviewed: remote `main` branches and release tags, 2026-08-27
 
 This matrix tests the current references without imposing provider-specific API symmetry. `N/A` means the capability is not claimed by that provider; it is not a failure.
@@ -28,7 +28,7 @@ This matrix tests the current references without imposing provider-specific API 
 | Immutable AI SDK dependency | PASS | PASS | `github:kujolang/ai-sdk@v1.1.0` | Validated by both. |
 | Clean-room install outside checkouts | PASS | PASS | Phase 2/Anthropic reports | Blocking distribution requirement. |
 | Lockfile reinstall | PASS | PASS | Both installed gates | Deterministic source refs recorded. |
-| Installed consumer smoke | PASS | PASS | Ollama `1/1`; Anthropic `1/1` | `KUJO_MODULE_PATH` explicitly configured. |
+| Installed consumer smoke | PASS | PASS | Ollama `1/1`; Anthropic `1/1` | Fresh consumers run without manual `KUJO_MODULE_PATH`; lockfile roots are discovered by Kujo. |
 | Offline default gate | PASS | PASS | Ollama `10/10`; Anthropic `12/12` | Credential/network free. |
 | Live status honestly reported | PASS | PASS | Both report skipped environments | Skips are not claimed as passes. |
 | No destructive default operations | PASS | PASS | Fixture-only lifecycle/tool tests | Security requirement. |
@@ -39,4 +39,4 @@ This matrix tests the current references without imposing provider-specific API 
 - Ollama: **CONFORMANT** — Native Package, AI SDK Integrated, Distribution Validated, Release Ready.
 - Anthropic: **CONFORMANT** — Native Package, AI SDK Integrated, Distribution Validated, Release Ready.
 
-The `KUJO_MODULE_PATH` requirement is recorded as current platform ergonomics debt, not provider non-conformance. Live provider execution was skipped in both environments and is optional under the contract when deterministic gates pass.
+Lockfile-driven package-root discovery is now validated platform behavior; `KUJO_MODULE_PATH` remains an explicit extension point. Live provider execution was skipped in both environments and is optional under the contract when deterministic gates pass.

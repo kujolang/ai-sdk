@@ -1,8 +1,8 @@
 # Kujo Provider Package Contract v1
 
 Status: normative ecosystem specification  
-Version: `1.0.0`  
-Canonical home: `kujolang/ai-sdk/docs/KUJO_PROVIDER_PACKAGE_CONTRACT_V1.md`  
+Version: `1.0.1`
+Canonical home: `kujolang/ai-sdk/docs/KUJO_PROVIDER_PACKAGE_CONTRACT_V1.md`
 Evidence base: `kujolang/ollama` and `kujolang/anthropic`, reviewed 2026-08-27
 
 This contract standardizes provider-package architecture and release quality. It does not standardize provider APIs. A conforming package preserves the real capabilities and semantics of its provider while offering an optional normalized AI SDK integration.
@@ -21,7 +21,7 @@ This contract standardizes provider-package architecture and release quality. It
 
 ## 1. Version independence
 
-This contract is version `1.0.0`. Its version is independent of the AI SDK package version, AI SDK normalized response contract, AI SDK provider-driver contract, model-catalog contract, provider API version, and individual provider package version. A package MUST record its conformance to this contract in its implementation report and SHOULD record `provider_package_contract = "1.0.0"` in manifest metadata when the supported Kennel schema permits it.
+This contract is version `1.0.1`. This patch clarifies that Kujo automatically discovers existing Kennel package roots from the nearest lockfile; `KUJO_MODULE_PATH` remains an explicit extension point. Its version is independent of the AI SDK package version, AI SDK normalized response contract, AI SDK provider-driver contract, model-catalog contract, provider API version, and individual provider package version. A package MUST record its conformance to this contract in its implementation report and SHOULD record `provider_package_contract = "1.0.1"` in manifest metadata when the supported Kennel schema permits it.
 
 ## 2. Repository structure
 
@@ -133,7 +133,7 @@ Any AI SDK dependency MUST use an immutable, reproducible, Kennel-resolvable ref
 
 Package-root shims SHOULD explicitly export imported public symbols, allowing familiar imports such as `from provider_package import primary_function`. Generic module names MAY be used only when they do not create an avoidable collision; provider-qualified modules are preferred for discoverability.
 
-Current Kujo runtime behavior requires installed Kennel package roots to be supplied through `KUJO_MODULE_PATH` for consumer execution. Clean-room tests MUST configure this explicitly and MUST document it. This is a **PLATFORM REQUIREMENT**, **NOT IDEAL LONG-TERM UX**, and **NOT A PROVIDER RESPONSIBILITY**. Packages MUST NOT add provider-specific runtime hacks to conceal it.
+Kujo automatically discovers existing installed Kennel package roots named by the nearest project's `kennel.lock`. Clean-room tests MUST prove this from a fresh project without manually assembling package paths. `KUJO_MODULE_PATH` remains available for explicit custom roots and advanced workflows and is resolved before lockfile-derived roots. Packages MUST NOT add provider-specific runtime hacks to conceal or replace this platform behavior.
 
 ## 19. Deterministic testing
 
@@ -203,7 +203,7 @@ A conforming package MUST NOT:
 - require identical native APIs across providers;
 - bypass AI SDK transport, endpoint policy, protected headers, retries, budgets, concurrency, or redaction;
 - mutate or delete user provider resources in default tests;
-- solve current `KUJO_MODULE_PATH` ergonomics with provider-specific hacks.
+- solve package import ergonomics with provider-specific hacks or network-time discovery.
 
 ## 26. Provider-specific extension freedom
 
@@ -215,7 +215,8 @@ The following are current platform requirements, not provider obligations:
 
 | Friction | Classification | Follow-up |
 |---|---|---|
-| Installed package roots require `KUJO_MODULE_PATH`. | CURRENT PLATFORM REQUIREMENT; NOT IDEAL LONG-TERM UX; NOT A PROVIDER RESPONSIBILITY. | Separate Kujo/Kennel investigation. |
+| Kujo discovers existing locked Kennel package roots automatically. | VALIDATED PLATFORM BEHAVIOR. | Keep discovery project-scoped, lockfile-driven, offline, and deterministic. |
+| `KUJO_MODULE_PATH` remains available for explicit roots. | PLATFORM EXTENSION. | Preserve for custom modules, CI, and non-Kennel dependencies. |
 | Root shims must explicitly export imported symbols. | CURRENT RUNTIME/PACKAGE BEHAVIOR. | Keep shims explicit until namespace/export ergonomics improve. |
 
 This contract does not redesign Kujo or Kennel.
