@@ -1,6 +1,6 @@
 [package]
 name = "ai-sdk"
-version = "1.0.0"
+version = "1.1.0"
 description = "Provider-agnostic SDK primitives for building OpenAI-compatible chat integrations in Kujo."
 license = "MIT"
 authors = ["Robert DeVore"]

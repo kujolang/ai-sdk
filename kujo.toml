@@ -2,6 +2,6 @@
 # Canonical package metadata is defined in kennel.toml.
 # Keep this identity aligned for tool compatibility.
 name = "ai-sdk"
-version = "1.0.0"
+version = "1.1.0"
 
 [dependencies]

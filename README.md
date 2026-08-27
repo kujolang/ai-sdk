@@ -4,7 +4,7 @@ The SDK supports both legacy OpenAI-compatible provider dictionaries and native 
 
 Public extension modules are exported as `driver` and `openai_compatible_driver`. Drivers encode bounded request descriptors and decode provider-native responses; they never perform network I/O.
 
-[![Version](https://img.shields.io/badge/version-1.0.0-black)](https://github.com/kujolang/ai-sdk)
+[![Version](https://img.shields.io/badge/version-1.1.0-black)](https://github.com/kujolang/ai-sdk)
 [![License](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
 [![built with Kujo](https://img.shields.io/badge/built%20with-Kujo-white.svg)](https://github.com/kujolang/kujo)
 

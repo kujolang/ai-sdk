@@ -1,11 +1,13 @@
 # Changelog
 
-## Unreleased
+## 1.1.0 - 2026-08-26
 
 - Added provider-driver contract 1.0.0 and additive Kennel exports.
 - Added implicit built-in OpenAI-compatible driver resolution without changing legacy APIs.
 - Added bounded descriptors, semantic decode boundaries, a fictional native-provider fixture, and adversarial tests.
 - Preserved normalized response/model-catalog contract 1.0.0, custom transports, buffered streaming, and operational controls.
+
+This is an additive package release. The provider-driver contract, normalized response contract, and model-catalog contract remain at 1.0.0.
 
 All notable changes to this project will be documented in this file.
 
