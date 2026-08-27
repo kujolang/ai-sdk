@@ -82,11 +82,11 @@ Core rejects driver-selected host changes, remote HTTP, URL credentials/query/fr
 - Contract tests: 5/5.
 - OpenAI regression tests: 4/4.
 - External fictional-driver tests: 5/5.
-- Malicious-driver tests: 7/7.
+- Malicious-driver tests: 8/8.
 
 ## Existing Tests
 
-The release gate passed all original suites: SDK contract 31/31, resilience 40/40, embeddings 14/14, security 3/3, reliability 9/9, parser 3/3, feature 3/3, bugfix 10/10, and live-provider policy 1/1 (credential-free skip path), plus schema fixtures, examples, and benchmark quality thresholds. Model catalog, model-preference, telemetry, and supply-chain checks remained unchanged and passed in the implementation baseline/final validation.
+The release gate passed 136 tests: driver contract 5/5, OpenAI regression 4/4, external fixture 5/5, malicious-driver security 8/8, SDK contract 31/31, resilience 40/40, embeddings 14/14, security redaction 3/3, reliability 9/9, parser 3/3, feature 3/3, bugfix 10/10, and live-provider policy 1/1 (credential-free skip path), plus schema fixtures, examples, and benchmark quality thresholds. Model catalog, model-preference, telemetry, and supply-chain checks remained unchanged and passed in final validation.
 
 ## Downstream Compatibility
 

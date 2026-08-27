@@ -51,7 +51,7 @@ MIN_TOTAL_TEST_FLOOR=123
 run_test_suite_with_floor tests/provider_driver_contract_tests.kujo 5
 run_test_suite_with_floor tests/openai_compatible_driver_regression_tests.kujo 4
 run_test_suite_with_floor tests/external_driver_fixture_tests.kujo 5
-run_test_suite_with_floor tests/provider_driver_security_tests.kujo 7
+run_test_suite_with_floor tests/provider_driver_security_tests.kujo 8
 run_test_suite_with_floor tests/sdk_contract_tests.kujo 28
 run_test_suite_with_floor tests/sdk_contract_resilience_tests.kujo 39
 run_test_suite_with_floor tests/sdk_contract_embeddings_tests.kujo 14
