@@ -6,9 +6,9 @@ The two independent provider references—Ollama and Anthropic—were converted 
 
 ## Evidence Reviewed
 
-- `kujolang/ollama` remote `main` `624921aebfb99eb032cad409bee5a4f05778b46e`, tag `v0.1.8` peeled `6ba6019aaa6eec78c8e9ced6b938f70e92ae8687`.
-- `kujolang/anthropic` remote `main` `6d5875045777c0528fe961187b3e8fe26f111ad6`, tag `v0.1.1` peeled `f6374405b99fd9f3edc74d575cbb79b1b2e6102f`.
-- `kujolang/ai-sdk` `v1.1.0`, driver contract `1.0.0`, normalized contract `1.0.0`.
+- `kujolang/ollama` remote `main` `80ad84b...`, tag `v0.1.8` peeled `6ba6019aaa6eec78c8e9ced6b938f70e92ae8687`.
+- `kujolang/anthropic` remote `main` `5d0cab7...`, tag `v0.1.1` peeled `f6374405b99fd9f3edc74d575cbb79b1b2e6102f`.
+- `kujolang/ai-sdk` remote `main` `acb7247...`, release tag `v1.1.0`, driver contract `1.0.0`, normalized contract `1.0.0`.
 - `kujolang/kennel` current manifest, resolver, lockfile, export, and installed-package behavior.
 - Ollama `PROVIDER_PACKAGE_PATTERN_DRAFT.md`, implementation and phase-2 reports.
 - Anthropic implementation report and pattern validation report.
