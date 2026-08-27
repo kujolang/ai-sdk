@@ -1,5 +1,7 @@
 # Provider Extension Guide
 
+For the complete normative package, distribution, security, and clean-room requirements, see [Kujo Provider Package Contract v1](KUJO_PROVIDER_PACKAGE_CONTRACT_V1.md).
+
 ## Native provider drivers
 
 A driver has `contract: "ai-sdk-provider-driver"`, `version: "1.0.0"`, a non-empty `id`, and required `describe`, `validate`, `encode_chat`, `decode_chat`, and `decode_error` functions. Streaming requires `decode_stream`; embeddings require paired `encode_embeddings` and `decode_embeddings` hooks.

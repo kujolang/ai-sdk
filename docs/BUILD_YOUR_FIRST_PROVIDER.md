@@ -1,5 +1,7 @@
 # Build Your First Provider
 
+Provider repositories must also follow [Kujo Provider Package Contract v1](KUJO_PROVIDER_PACKAGE_CONTRACT_V1.md) for native/driver separation, immutable Kennel dependencies, installed-package validation, and release readiness.
+
 Use the existing custom OpenAI-compatible factory when the service accepts OpenAI Chat Completions and embeddings shapes. Use a native driver only when authentication, request, response, error, or stream formats differ. A native package returns the ordinary provider dictionary with a `driver` field; applications still call the existing AI SDK functions unchanged.
 
 Any OpenAI-compatible chat/embeddings endpoint can be wired up in a few lines.
