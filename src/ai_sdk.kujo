@@ -861,7 +861,13 @@ func normalize_usage_fields(raw_usage, defaults) {
 	usage := {
 		"input_tokens": dict_get_or(defaults, "input_tokens", 0),
 		"output_tokens": dict_get_or(defaults, "output_tokens", 0),
-		"total_tokens": dict_get_or(defaults, "total_tokens", 0)
+		"total_tokens": dict_get_or(defaults, "total_tokens", 0),
+		"cached_input_tokens": null,
+		"cache_write_input_tokens": null,
+		"reasoning_tokens": null,
+		"usage_source": "provider",
+		"total_semantics": "provider_reported",
+		"provider_usage": null
 	}
 
 	if type(raw_usage) != "dict" {
@@ -882,6 +888,28 @@ func normalize_usage_fields(raw_usage, defaults) {
 		usage["total_tokens"] := dict_get_or(raw_usage, "total_tokens", usage["total_tokens"])
 	} else {
 		usage["total_tokens"] := usage["input_tokens"] + usage["output_tokens"]
+		usage["total_semantics"] := "input_plus_output"
+	}
+
+	cached := dict_get_or(raw_usage, "cached_tokens", dict_get_or(raw_usage, "cached_input_tokens", null))
+	prompt_details := dict_get_or(raw_usage, "prompt_tokens_details", null)
+	if type(prompt_details) == "dict" { cached = dict_get_or(prompt_details, "cached_tokens", cached) }
+	completion_details := dict_get_or(raw_usage, "completion_tokens_details", null)
+	reasoning := dict_get_or(raw_usage, "reasoning_tokens", null)
+	if type(completion_details) == "dict" { reasoning = dict_get_or(completion_details, "reasoning_tokens", reasoning) }
+	cache_write := dict_get_or(raw_usage, "cache_write_input_tokens", dict_get_or(raw_usage, "cache_creation_input_tokens", null))
+	usage["cached_input_tokens"] := cached
+	usage["cache_write_input_tokens"] := cache_write
+	usage["reasoning_tokens"] := reasoning
+	usage["provider_usage"] := {
+		"prompt_tokens": dict_get_or(raw_usage, "prompt_tokens", null),
+		"completion_tokens": dict_get_or(raw_usage, "completion_tokens", null),
+		"input_tokens": dict_get_or(raw_usage, "input_tokens", null),
+		"output_tokens": dict_get_or(raw_usage, "output_tokens", null),
+		"total_tokens": dict_get_or(raw_usage, "total_tokens", null),
+		"cached_tokens": cached,
+		"cache_write_input_tokens": cache_write,
+		"reasoning_tokens": reasoning
 	}
 
 	return usage
@@ -3565,6 +3593,7 @@ export sdk_contract_version := contract_version_value
 export merge_headers_for_request := merge_headers_with_policy
 export normalize_non_stream_success := normalize_success_response
 export normalize_stream_success := normalize_stream_success_response
+export normalize_usage_contract := normalize_usage_fields
 export resolve_options := resolve_chat_options
 export sdk_default_limits := default_limits
 export chat_completion := chat_completion_impl

@@ -1,0 +1,56 @@
+export WATCHDOG_NATIVE_EVENT_SCHEMA := "watchdog.native-event.v1"
+
+func telemetry_get(value, key, fallback) {
+	if type(value) == "dict" && has_key(value, key) { return value[key] }
+	return fallback
+}
+
+func telemetry_text(value, fallback) {
+	if type(value) == "string" && trim(value) != "" { return trim(value) }
+	return fallback
+}
+
+func telemetry_status(result) {
+	if type(result) != "dict" { return "error" }
+	if telemetry_get(result, "ok", false) { return "ok" }
+	code := to_lower(telemetry_text(telemetry_get(telemetry_get(result, "error", {}), "code", ""), ""))
+	if code == "timeout" || code == "deadline_exceeded" { return "timeout" }
+	if code == "cancelled" { return "cancelled" }
+	return "error"
+}
+
+# Pure provider-neutral mapping. It accepts only normalized SDK result fields;
+# prompts, responses, headers, provider raw payloads, and credentials have no
+# place in this contract and therefore cannot be accidentally exported.
+export watchdog_model_event := func(input) {
+	if type(input) != "dict" { return {"ok": false, "error": "input must be an object"} }
+	for required in ["event_id", "trace_id", "span_id", "started_at_ms"] {
+		if has_key(input, required) == 0 { return {"ok": false, "error": required + " is required"} }
+	}
+	result := telemetry_get(input, "result", {})
+	provider := telemetry_text(telemetry_get(result, "provider", telemetry_get(input, "provider", "unknown")), "unknown")
+	model := telemetry_text(telemetry_get(result, "model", telemetry_get(input, "model", "unknown")), "unknown")
+	ended := telemetry_get(input, "ended_at_ms", null)
+	status := "unset"
+	if type(ended) != "null" { status = telemetry_status(result) }
+	usage := null
+	if type(result) == "dict" && type(telemetry_get(result, "usage", null)) == "dict" { usage = result["usage"] }
+	error_value := null
+	if status == "error" || status == "timeout" || status == "cancelled" {
+		error_value = {"category": telemetry_text(telemetry_get(telemetry_get(result, "error", {}), "code", "provider"), "provider"), "message": null}
+	}
+	refs := []
+	for ref in [["session", "session_id"], ["run", "run_id"], ["request", "request_id"]] {
+		value := telemetry_text(telemetry_get(input, ref[1], ""), "")
+		if value != "" { refs = push(refs, {"type": ref[0], "id": value, "namespace": "ai-sdk", "relation": "source"}) }
+	}
+	return {"ok": true, "event": {
+		"schema_version": WATCHDOG_NATIVE_EVENT_SCHEMA,
+		"event_id": telemetry_text(input["event_id"], "event"), "event_kind": "model", "instantaneous": type(ended) == "null",
+		"trace_id": telemetry_text(input["trace_id"], "trace"), "span_id": telemetry_text(input["span_id"], "span"),
+		"parent_span_id": telemetry_get(input, "parent_span_id", null), "name": "ai_sdk.model", "status": status,
+		"started_at_ms": input["started_at_ms"], "ended_at_ms": ended, "references": refs,
+		"attributes": {"gen_ai.provider.name": provider, "gen_ai.request.model": model, "gen_ai.operation.name": telemetry_text(telemetry_get(input, "operation", "chat"), "chat"), "server.address": telemetry_text(telemetry_get(input, "server_address", ""), "")},
+		"usage": usage, "costs": telemetry_get(input, "costs", []), "error": error_value
+	}}
+}

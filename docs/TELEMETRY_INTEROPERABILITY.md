@@ -6,6 +6,12 @@ Driver adoption does not change hook payloads or normalized telemetry fields. Dr
 
 This guide shows how to map AI SDK lifecycle hooks to common observability systems, including OpenTelemetry-style traces and metrics.
 
+For Watchdog ingestion, `src/watchdog_telemetry.kujo` is the authoritative pure
+adapter. It emits `watchdog.native-event.v1`; a host-owned, fail-open delivery
+client sends that event to Watchdog. The SDK does not write Watchdog storage,
+own retention, or perform exporter work. Raw request/response content is not an
+adapter input, so enabling the integration cannot increase content capture.
+
 ## Available Hook Signals
 
 Request option hooks:
@@ -30,10 +36,10 @@ Response-level deterministic counters:
 Suggested OpenTelemetry mapping:
 - span name: `ai_sdk.chat_completion`
 - span attributes:
-  - `ai.provider` <- `provider`
+  - `gen_ai.provider.name` <- `provider`
   - `http.url` <- `url`
-  - `ai.stream` <- `stream`
-  - `ai.attempt` <- `attempt`
+  - `gen_ai.request.stream` <- `stream`
+  - `ai_sdk.request.attempt` <- `attempt`
 
 `on_retry(event)` emits:
 - `attempt`

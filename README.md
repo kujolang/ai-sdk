@@ -443,6 +443,12 @@ Raw success/error payloads are recursively redacted for common and alias secret-
 
 OpenTelemetry-style mapping guidance and a runnable bridge example are available in [docs/TELEMETRY_INTEROPERABILITY.md](docs/TELEMETRY_INTEROPERABILITY.md).
 
+For Watchdog, import `src/watchdog_telemetry.kujo` and map normalized results
+with `watchdog_model_event`. The adapter is provider-neutral and metadata-only:
+it never accepts prompts, responses, raw provider payloads, headers, or
+credentials. It preserves cache, cache-write, reasoning, and provider-native
+usage distinctions through the normalized usage contract.
+
 Production defaults and incident procedures are documented in [docs/PRODUCTION_PROFILE_AND_RUNBOOK.md](docs/PRODUCTION_PROFILE_AND_RUNBOOK.md).
 
 ## Custom Provider Endpoint Validation

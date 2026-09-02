@@ -46,7 +46,7 @@ run_test_suite_with_floor() {
 }
 
 TOTAL_TEST_COUNT=0
-MIN_TOTAL_TEST_FLOOR=123
+MIN_TOTAL_TEST_FLOOR=125
 
 run_test_suite_with_floor tests/provider_driver_contract_tests.kujo 5
 run_test_suite_with_floor tests/openai_compatible_driver_regression_tests.kujo 4
@@ -61,6 +61,7 @@ run_test_suite_with_floor tests/parser_fuzz_smoke_tests.kujo 3
 run_test_suite_with_floor tests/feature_smoke_tests.kujo 3
 run_test_suite_with_floor tests/bugfix_regression_tests.kujo 10
 run_test_suite_with_floor tests/live_provider_smoke_tests.kujo 1
+run_test_suite_with_floor tests/watchdog_telemetry_contract_tests.kujo 2
 
 if (( TOTAL_TEST_COUNT < MIN_TOTAL_TEST_FLOOR )); then
 	echo "Aggregate quality floor violation: expected at least ${MIN_TOTAL_TEST_FLOOR} tests, got ${TOTAL_TEST_COUNT}."
