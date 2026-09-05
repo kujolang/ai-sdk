@@ -1,0 +1,11 @@
+# Advisory benchmark: same catalog and lookup workload before/after changes.
+from src.model_catalog import create_model_catalog, resolve_model_catalog_entry
+entries := []
+for i in range(0, 20) { entries = push(entries, {"provider": "benchmark", "model": "model-" + to_string(i)}) }
+catalog := create_model_catalog("benchmark", "1", entries, {})
+started := current_timestamp()
+for i in range(0, 20) {
+ result := resolve_model_catalog_entry(catalog, "benchmark", "model-" + to_string(i))
+ if !result["ok"] { exit(1) }
+}
+print(to_json({"models": 20, "lookups": 20, "elapsed_ms": current_timestamp() - started}))

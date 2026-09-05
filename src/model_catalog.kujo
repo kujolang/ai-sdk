@@ -87,10 +87,12 @@ func model_key(entry) {
 func sort_model_metadata(entries) {
 	result := []
 	for entry in entries {
+		entry_key := model_key(entry)
 		inserted := false
 		updated := []
 		for existing in result {
-			if inserted == false && model_key(entry) < model_key(existing) {
+            existing_key := model_key(existing)
+			if inserted == false && (entry_key < existing_key || (entry_key == existing_key && to_string(dict_get_or(entry, "provider", "")) < to_string(dict_get_or(existing, "provider", "")))) {
 				updated := push(updated, entry)
 				inserted := true
 			}
@@ -170,8 +172,8 @@ func validate_model_catalog_impl(catalog) {
 		for entry_error in entry_errors {
 			errors := push(errors, entry_error)
 		}
-		key := model_key(entry)
-		if key != "::" {
+		key := to_json([dict_get_or(entry, "provider", ""), dict_get_or(entry, "model", "")])
+		if type(entry) == "dict" {
 			if has_key(seen, key) {
 				errors := push(errors, {"field": "models[" + to_string(index) + "]", "message": "Duplicate provider/model entry: " + key})
 			}
@@ -180,7 +182,7 @@ func validate_model_catalog_impl(catalog) {
 		index = index + 1
 	}
 	provided_hash := normalized_string(dict_get_or(catalog, "catalog_hash", ""), "")
-	if provided_hash != "" && provided_hash != model_catalog_hash_impl(catalog) {
+	if len(errors) == 0 && provided_hash != "" && provided_hash != model_catalog_hash_impl(catalog) {
 		errors := push(errors, {"field": "catalog_hash", "message": "Catalog hash does not match canonical catalog content."})
 	}
 	return {"ok": len(errors) == 0, "errors": errors}
@@ -241,6 +243,15 @@ func create_model_catalog_from_config_impl(config) {
 	if type(config) != "dict" {
 		return {"ok": false, "errors": [{"field": "config", "message": "Catalog config must be a dict."}]}
 	}
+ errors := []
+ for field in ["id", "version"] {
+  if normalized_string(dict_get_or(config, field, ""), "") == "" {
+   errors = push(errors, {"field": field, "message": "Catalog " + field + " is required."})
+  }
+ }
+ if type(dict_get_or(config, "models", [])) != "array" { errors = push(errors, {"field": "models", "message": "Catalog models must be an array."}) }
+ if type(dict_get_or(config, "metadata", {})) != "dict" { errors = push(errors, {"field": "metadata", "message": "Catalog metadata must be a dict."}) }
+ if len(errors) > 0 { return {"ok": false, "errors": errors} }
 	catalog := create_model_catalog_impl(dict_get_or(config, "id", ""), dict_get_or(config, "version", ""), dict_get_or(config, "models", []), dict_get_or(config, "metadata", {}))
 	validation := validate_model_catalog_impl(catalog)
 	return {"ok": validation["ok"], "catalog": catalog, "errors": validation["errors"]}
@@ -299,13 +310,15 @@ func resolve_model_catalog_entry_impl(catalog, provider_id, model_id) {
 	}
 	requested_key := normalized_string(provider_id, "") + "::" + normalized_string(model_id, "")
 	for entry in dict_get_or(catalog, "models", []) {
-		if model_key(entry) == requested_key {
+		if dict_get_or(entry, "provider", "") == normalized_string(provider_id, "") && dict_get_or(entry, "model", "") == normalized_string(model_id, "") {
+            resolved_hash := dict_get_or(catalog, "catalog_hash", "")
+            if resolved_hash == "" { resolved_hash = model_catalog_hash_impl(catalog) }
 			return {
 				"ok": true,
 				"entry": entry,
 				"catalog_id": dict_get_or(catalog, "id", ""),
 				"catalog_version": dict_get_or(catalog, "version", ""),
-				"catalog_hash": dict_get_or(catalog, "catalog_hash", model_catalog_hash_impl(catalog))
+				"catalog_hash": resolved_hash
 			}
 		}
 	}

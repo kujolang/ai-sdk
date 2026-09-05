@@ -71,3 +71,26 @@ test "catalog lookup returns structured missing result" {
 	assert_false(missing["ok"])
 	assert_equal(missing["error"]["code"], "model_not_in_catalog")
 }
+
+test "catalog rejects malformed authoring shape instead of silently creating defaults" {
+ for config in [{"models": "bad"}, {"id": "x", "version": "1", "models": "bad"}, {"id": "x", "version": "1", "models": [], "metadata": "bad"}, {"id": "", "version": "1", "models": []}] {
+  assert_false(create_model_catalog_from_config(config)["ok"])
+ }
+}
+
+test "catalog validator contains malformed models even when a hash is supplied" {
+ result := validate_model_catalog({"id": "x", "version": "1", "models": 42, "catalog_hash": "bad"})
+ assert_false(result["ok"])
+}
+
+test "catalog routing distinguishes delimiter-bearing provider and model identities" {
+ catalog := create_model_catalog("x", "1", [
+  {"provider": "a::b", "model": "c"}, {"provider": "a", "model": "b::c"}
+ ], {})
+ assert_true(catalog["validation"]["ok"])
+ result := resolve_model_catalog_entry(catalog, "a", "b::c")
+ assert_true(result["ok"])
+ assert_equal(result["entry"]["provider"], "a")
+ reordered := create_model_catalog("x", "1", [{"provider": "a", "model": "b::c"}, {"provider": "a::b", "model": "c"}], {})
+ assert_equal(catalog["catalog_hash"], reordered["catalog_hash"])
+}
