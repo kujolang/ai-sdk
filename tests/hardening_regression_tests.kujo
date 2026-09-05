@@ -1,0 +1,27 @@
+test_setup {
+ from src.providers import openai_provider
+ from src.ai_sdk import create_client, create_message, chat_completion, embeddings, normalize_provider_error
+}
+
+test "throwing transports return terminal errors for chat and embeddings" {
+ client := create_client(openai_provider(), "fixture-key")
+ options := {"transport": func(u, o) { parse_json("{") }, "max_retries": 2}
+ result := chat_completion(client, [create_message("user", "x")], options)
+ assert_false(result["ok"])
+ assert_equal(result["error"]["code"], "transport_error")
+ assert_false(result["error"]["retryable"])
+ assert_equal(result["observability"]["start_count"], 1)
+ assert_equal(client["in_flight_requests"], 0)
+ result = embeddings(client, "x", options)
+ assert_equal(result["error"]["code"], "transport_error")
+ assert_false(result["error"]["retryable"])
+}
+
+test "normalized provider error metadata cannot expose the configured credential" {
+ client := create_client(openai_provider(), "private-fixture-credential")
+ result := normalize_provider_error(client, 401, {"error": {
+  "message": "Rejected private-fixture-credential", "type": "private-fixture-credential",
+  "param": "private-fixture-credential", "code": "private-fixture-credential"
+ }})
+ assert_equal(contains(to_json(result), "private-fixture-credential"), 0)
+}

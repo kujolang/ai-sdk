@@ -554,6 +554,31 @@ func redact_sensitive_payload(raw_value) {
 	return raw_value
 }
 
+# Error diagnostics may echo credentials even when their field names are harmless.
+func redact_known_credential(value, credential) {
+ if type(value) == "string" { return replace(value, credential, "[REDACTED]") }
+ if type(value) == "dict" {
+  redacted := {}
+  for key in keys(value) { redacted[key] = redact_known_credential(value[key], credential) }
+  return redacted
+ }
+ if type(value) == "array" {
+  redacted_items := []
+  for item in value { redacted_items = push(redacted_items, redact_known_credential(item, credential)) }
+  return redacted_items
+ }
+ return value
+}
+
+func redact_error_diagnostic(client, value) {
+ redacted := redact_sensitive_payload(value)
+ credential := dict_get_or(client, "api_key", "")
+ if type(credential) == "string" && credential != "" {
+  return redact_known_credential(redacted, credential)
+ }
+ return redacted
+}
+
 func standard_error_response_impl(client, error_code, message, status_code, raw, retryable) {
 	return {
 		"ok": false,
@@ -561,12 +586,12 @@ func standard_error_response_impl(client, error_code, message, status_code, raw,
 		"contract_version": contract_version_value(),
 		"error": {
 			"code": error_code,
-			"message": message,
+			"message": redact_error_diagnostic(client, message),
 			"retryable": retryable
 		},
 		"status_code": status_code,
 		"normalized_at": current_timestamp(),
-		"raw": redact_sensitive_payload(raw)
+		"raw": redact_error_diagnostic(client, raw)
 	}
 }
 
@@ -696,13 +721,13 @@ func normalize_provider_error_payload(client, status_code, data) {
 	provider_code := dict_get_or(err_obj, "code", "")
 
 	if err_type != "" {
-		normalized_error["type"] := err_type
+		normalized_error["type"] := redact_error_diagnostic(client, err_type)
 	}
 	if err_param != "" {
-		normalized_error["param"] := err_param
+		normalized_error["param"] := redact_error_diagnostic(client, err_param)
 	}
 	if provider_code != "" {
-		normalized_error["provider_code"] := provider_code
+		normalized_error["provider_code"] := redact_error_diagnostic(client, provider_code)
 	}
 	response["error"] := normalized_error
 
@@ -1733,7 +1758,7 @@ func driver_error_result(client, status_code, response, body_text) {
 	if code == "auth_error" { retryable = false }
 	result := standard_error_response_impl(client, code, dict_get_or(value, "message", "Provider returned an error"), status_code, dict_get_or(value, "raw_provider", data), retryable)
 	error_payload := result["error"]
-	for key in ["type", "param", "provider_code"] { if dict_get_or(value, key, "") != "" { error_payload[key] = value[key] } }
+	for key in ["type", "param", "provider_code"] { if dict_get_or(value, key, "") != "" { error_payload[key] = redact_error_diagnostic(client, value[key]) } }
 	result["error"] := error_payload
 	return result
 }
@@ -1783,7 +1808,19 @@ func execute_embeddings_request_once(client, payload, resolved_options, attempt,
 	request_options["_headers"] := request_context["headers"]
 	request_options["_body"] := request_context["body"]
 
-	http_result := request_context["transport"](request_context["url"], request_options)
+ http_result := null
+ transport_threw := false
+ try {
+  http_result = request_context["transport"](request_context["url"], request_options)
+ } except err {
+  transport_threw = true
+ }
+ if transport_threw {
+  # A thrown callback has unknown completion state; do not replay it or expose
+  # its exception text, which may contain request headers or credentials.
+  result := standard_error_response_impl(client, "transport_error", "Transport callback threw an exception. Return Ok(response) or Err(message).", 0, null, false)
+  return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
+ }
 	match http_result {
 		case Ok(response): {
 			status_code := dict_get_or(response, "_status", dict_get_or(response, "status", 0))
@@ -2947,7 +2984,19 @@ func execute_request_once(client, messages, options, resolved_options, payload, 
 	request_options["_headers"] := request_context["headers"]
 	request_options["_body"] := request_context["body"]
 
-	http_result := request_context["transport"](request_context["url"], request_options)
+ http_result := null
+ transport_threw := false
+ try {
+  http_result = request_context["transport"](request_context["url"], request_options)
+ } except err {
+  transport_threw = true
+ }
+ if transport_threw {
+  # A thrown callback has unknown completion state; do not replay it or expose
+  # its exception text, which may contain request headers or credentials.
+  result := standard_error_response_impl(client, "transport_error", "Transport callback threw an exception. Return Ok(response) or Err(message).", 0, null, false)
+  return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
+ }
 	match http_result {
 		case Ok(response): {
 			status_code := dict_get_or(response, "_status", dict_get_or(response, "status", 0))
