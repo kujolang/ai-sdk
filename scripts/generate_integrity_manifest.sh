@@ -12,7 +12,7 @@ TARGET_FILES=(
 	"CHANGELOG.md"
 	"README.md"
 	"docs/API_CONTRACT_POLICY.md"
-	"docs/SDK_IMPROVEMENT_CHECKLIST.md"
+	"docs/ARCHITECTURE_DATA_FLOW.md"
 	"scripts/release_quality_gates.sh"
 	"scripts/verify_contract_schemas.sh"
 	"scripts/supply_chain_policy_check.sh"

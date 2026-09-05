@@ -13,15 +13,6 @@ if [[ -z "$real_bin" ]]; then
 	exit 1
 fi
 
-stage_workspace() {
-	local tmp_root
-	tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/kujo-workspace.XXXXXX")"
-
-	rsync -a --exclude='.git' "$script_dir"/ "$tmp_root"/
-
-	printf '%s\n' "$tmp_root"
-}
-
 command_name="${1:-}"
 case "$command_name" in
 	run|test-run)
@@ -32,14 +23,16 @@ case "$command_name" in
 		shift
 		source_file="$1"
 		shift
-		tmp_root="$(stage_workspace)"
+		tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/kujo-workspace.XXXXXX")"
 		trap 'rm -rf "$tmp_root"' EXIT
+		# Register cleanup before staging, and keep the shell alive to run it.
+		rsync -a --exclude='.git' "$script_dir"/ "$tmp_root"/
 
 		source_file="${source_file#./}"
 		staged_file="$source_file"
 
 		cd "$tmp_root"
-		exec "$real_bin" "$command_name" "$staged_file" "$@"
+		"$real_bin" "$command_name" "$staged_file" "$@"
 		;;
 	*)
 		exec "$real_bin" "$@"

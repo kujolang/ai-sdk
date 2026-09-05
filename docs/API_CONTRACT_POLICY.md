@@ -80,3 +80,7 @@ Before merging contract-affecting changes:
 - run `bash scripts/verify_contract_schemas.sh`
 - run contract, reliability, parser fuzz, and feature smoke suites
 - verify release-validation workflow still passes
+
+## September 2026 hardening clarifications
+
+Normalized contract versions, exports, request options, and environment variables are unchanged. Throwing custom transports now produce non-retryable `transport_error` results instead of escaping the SDK; `Ok`/`Err` transport behavior is unchanged. Error diagnostics redact the configured credential. Catalog authoring rejects malformed config shapes before constructor normalization. Distinct provider/model pairs containing `::` resolve independently; their formerly ambiguous ordering is deterministic. Existing unambiguous catalog hashes are preserved.

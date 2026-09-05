@@ -83,7 +83,7 @@ If your change affects streaming/retry behavior, also run:
 When a provider is added or capability behavior changes:
 - Update provider list in `README.md`
 - Update examples if needed
-- Add checklist/session log evidence in `docs/SDK_IMPROVEMENT_CHECKLIST.md`
+- Record verification evidence and remaining work in `docs/audits/repository-hardening.md`
 
 ## Repeatable Provider Addition Checklist
 

@@ -242,7 +242,7 @@ kujo run scripts/generate_model_catalog.kujo --interpreter -- \
   examples/dispatch-model-catalog.config.json --output dispatch-model-catalog.json
 ```
 
-The script uses `create_model_catalog_from_config`, calculates the canonical hash, and exits nonzero when the config is invalid.
+The script uses `create_model_catalog_from_config`, calculates the canonical hash, and exits nonzero when the config is invalid. Authoring configs require nonempty `id` and `version`; `models` must be an array and `metadata` an object when supplied. The lower-level constructor retains its existing defaults.
 
 ## Minimal Usage
 
@@ -297,6 +297,8 @@ result := chat_completion_stream(client, messages, null, handler)
 
 `chat_completion_stream(...)` emits callback events and also returns the final normalized response with `emitted_events` attached for validation.
 
+Callbacks are emitted after the transport returns its buffered response; this API does not provide incremental network delivery. Set `max_raw_response_bytes` to bound retained parsing input (the transport must enforce its own download limit).
+
 If the callback throws, the stream call fails predictably with a normalized `stream_callback_error` response.
 
 ## Normalized Contract
@@ -329,6 +331,8 @@ Embeddings response includes:
 - `embeddings[]` entries with `index` and `vector`
 - `usage.input_tokens`, `usage.total_tokens`
 - `status_code`, `normalized_at`, `raw`
+
+Thrown transport callbacks return a terminal `transport_error`; exception text is withheld because it may contain credentials. Custom transports should return `Ok(response)` or `Err(message)`. Error messages, provider error metadata, and raw error payloads redact the configured credential as well as recognized secret patterns.
 
 ## Retry Policy
 
@@ -515,7 +519,7 @@ The root directory intentionally contains only package metadata, license/changel
 
 - Treat [examples/main.kujo](examples/main.kujo), [examples/telemetry_bridge.kujo](examples/telemetry_bridge.kujo), [examples/production_profile.kujo](examples/production_profile.kujo), and the README snippets as canonical copyable examples.
 - Treat `tests/` as behavior contracts and regression fixtures; keep explicit payloads and expected shapes when they clarify edge cases.
-- Treat `docs/SDK_IMPROVEMENT_CHECKLIST.md`, `docs/SDK_ENTERPRISE_READINESS_V2_CHECKLIST.md`, and `docs/SDK_ENTERPRISE_READINESS_V3_CHECKLIST.md` as historical completed logs, and `docs/SDK_ENTERPRISE_READINESS_V4_CHECKLIST.md` as the active backlog — not canonical usage examples.
+- See `docs/audits/repository-hardening.md` for the current hardening receipt and remaining work; use the examples above for canonical usage.
 - Exclude generated/bulk paths from the main sweep unless the task explicitly targets them; for this repo, start searches with `rg --glob '!artifacts/**' --glob '!schemas/contracts/**' ...`.
 - Keep example helpers local and boring (`kv`, `section`, `print_lines`) so agents can copy the demonstrated SDK call without importing extra abstractions.
 
@@ -655,3 +659,11 @@ kujo run scripts/stress_harness.kujo
 ## Contributing
 
 Contributions are welcome through issues and pull requests.
+
+## Repository verification
+
+Run `KUJO_BIN="$(command -v kujo)" bash scripts/release_quality_gates.sh` for all offline contract suites, wrapper cleanup regressions, documentation checks, schemas, examples, and benchmark gates. Live-provider smoke skips when credentials are absent; release validation still requires live evidence. Use `kujo run scripts/benchmark_model_catalog.kujo --interpreter` for an advisory catalog lookup measurement; compare on the same runtime and machine.
+
+The `./kujo` compatibility wrapper stages execution into a temporary repository copy and removes it on normal success/failure. Generated files in that copy are temporary; use the installed `kujo` command to keep generated outputs in this checkout.
+
+Shared `state_backend` hooks currently fall back to client-local state when reads fail and ignore write-hook exceptions. Their read/modify/write sequence is not atomic across processes. Treat these controls as best-effort accounting, not a strict distributed spending limit; use external serialized admission when strict enforcement is required.

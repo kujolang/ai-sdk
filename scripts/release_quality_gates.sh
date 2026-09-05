@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WRAPPER_BIN="$ROOT_DIR/kujo"
+cd "$ROOT_DIR"
 
 if [[ -z "${KUJO_BIN:-}" ]]; then
 	echo "Set KUJO_BIN to the Kujo runtime binary path."
@@ -14,7 +15,13 @@ run_runtime_command_with_warning_gate() {
 	shift
 
 	echo "Running ${command_label}: $*"
-	output="$(KUJO_BIN="$KUJO_BIN" "$WRAPPER_BIN" "$@" 2>&1)"
+	if output="$(KUJO_BIN="$KUJO_BIN" "$WRAPPER_BIN" "$@" 2>&1)"; then
+		:
+	else
+		status=$?
+		printf '%s\n' "$output" >&2
+		return "$status"
+	fi
 	echo "$output"
 
 	if echo "$output" | grep -q "Type checking warnings:"; then
@@ -28,7 +35,13 @@ run_test_suite_with_floor() {
 	local min_tests="$2"
 
 	echo "Running quality gate suite: ${test_file}"
-	output="$(KUJO_BIN="$KUJO_BIN" "$WRAPPER_BIN" test-run "$test_file")"
+	if output="$(KUJO_BIN="$KUJO_BIN" "$WRAPPER_BIN" test-run "$test_file" 2>&1)"; then
+		:
+	else
+		status=$?
+		printf '%s\n' "$output" >&2
+		return "$status"
+	fi
 	echo "$output"
 
 	total_tests="$(echo "$output" | sed -n 's/.*Tests:[[:space:]]*\([0-9][0-9]*\)[[:space:]]*total.*/\1/p' | tail -n 1)"
@@ -45,9 +58,14 @@ run_test_suite_with_floor() {
 	TOTAL_TEST_COUNT=$((TOTAL_TEST_COUNT + total_tests))
 }
 
+bash scripts/verify_docs.sh
+python3 tests/wrapper_regression_tests.py
+
 TOTAL_TEST_COUNT=0
 MIN_TOTAL_TEST_FLOOR=125
 
+run_test_suite_with_floor tests/model_catalog_tests.kujo 10
+run_test_suite_with_floor tests/hardening_regression_tests.kujo 2
 run_test_suite_with_floor tests/provider_driver_contract_tests.kujo 5
 run_test_suite_with_floor tests/openai_compatible_driver_regression_tests.kujo 4
 run_test_suite_with_floor tests/external_driver_fixture_tests.kujo 5

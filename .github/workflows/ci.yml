@@ -35,20 +35,7 @@ jobs:
 
       - name: Verify docs and command freshness
         shell: bash
-        run: |
-          set -euo pipefail
-          test -f docs/SDK_IMPROVEMENT_CHECKLIST.md
-          test -f docs/PROVIDER_EXTENSION_GUIDE.md
-          grep -q './kujo run examples/main.kujo' README.md
-          grep -q './kujo run scripts/stress_harness.kujo' README.md
-          grep -q 'export KUJO_BIN="${KUJO_BIN:-/path/to/kujo/target/debug/kujo}"' README.md
-          grep -q 'export KUJO_BIN="${KUJO_BIN:-/path/to/kujo/target/debug/kujo}"' docs/PROVIDER_EXTENSION_GUIDE.md
-          if grep -Eq '/Users/[^[:space:]]+/2026/' README.md docs/PROVIDER_EXTENSION_GUIDE.md; then
-            echo "Found machine-specific Kujo runtime paths in docs."
-            exit 1
-          fi
-          grep -q "src/ai_sdk.kujo" README.md
-          grep -q "src/providers.kujo" README.md
+        run: bash scripts/verify_docs.sh
 
       - name: Reject root scratch Kujo files
         shell: bash

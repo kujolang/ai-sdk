@@ -6,14 +6,14 @@
       "name": "AI SDK fixture example succeeds",
       "check": "command_succeeds",
       "params": {
-        "command": "cd /Users/robertdevore/2026/Kujolang/kujo-repos/ai-sdk && ./kujo run examples/main.kujo"
+        "command": "./kujo run examples/main.kujo"
       }
     },
     {
       "name": "AI SDK production profile example succeeds",
       "check": "command_succeeds",
       "params": {
-        "command": "cd /Users/robertdevore/2026/Kujolang/kujo-repos/ai-sdk && ./kujo run examples/production_profile.kujo"
+        "command": "./kujo run examples/production_profile.kujo"
       }
     },
     {
