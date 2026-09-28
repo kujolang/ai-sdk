@@ -4,31 +4,27 @@ on:
   push:
   pull_request:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
 jobs:
   sdk-contracts:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      KUJO_RUNTIME_REF: "7819d1475e909ec88f510c9927445791ea928836"
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - name: Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - name: Install checksum-verified published Kujo runtime
+        id: runtime
+        uses: kujolang/kujo/.github/actions/setup-kujo@fc53093f35e4236682bbbf5ab1ccc8d2b4df990c
+        with:
+          version: v1.6.0
 
-      - name: Build Kujo runtime
-        shell: bash
-        run: |
-          set -euo pipefail
-          # Pin runtime source for reproducible CI builds.
-          git init /tmp/kujo-runtime
-          git -C /tmp/kujo-runtime remote add origin https://github.com/kujolang/kujo.git
-          git -C /tmp/kujo-runtime fetch --depth 1 origin "$KUJO_RUNTIME_REF"
-          git -C /tmp/kujo-runtime checkout --detach "$KUJO_RUNTIME_REF"
-          cargo build --release --locked --manifest-path /tmp/kujo-runtime/Cargo.toml
-          echo "KUJO_BIN=/tmp/kujo-runtime/target/release/kujo" >> "$GITHUB_ENV"
+      - name: Export runtime path
+        run: echo "KUJO_BIN=${{ steps.runtime.outputs.kujo-path }}" >> "$GITHUB_ENV"
 
       - name: Verify Kujo runtime
         run: ./kujo --version

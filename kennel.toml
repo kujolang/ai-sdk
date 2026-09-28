@@ -1,6 +1,6 @@
 [package]
 name = "ai-sdk"
-version = "1.1.0"
+version = "1.1.1"
 description = "Provider-agnostic SDK primitives for building OpenAI-compatible chat integrations in Kujo."
 license = "MIT"
 authors = ["Robert DeVore"]
@@ -18,7 +18,7 @@ public_api = true
 notes = "API contracts are designed to remain stable under semantic versioning."
 
 [kujo]
-minimum_version = "0.1.0"
+minimum_version = "1.6.0"
 entry = "examples/main.kujo"
 sources = ["src", "."]
 includes = ["README.md", "tests"]
