@@ -124,12 +124,17 @@ jobs:
           set -euo pipefail
           bash scripts/supply_chain_policy_check.sh
 
+      - name: Prepare security artifact directory
+        run: mkdir -p artifacts/security
+
       - name: Generate SBOM (SPDX JSON)
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
         with:
           path: .
           format: spdx-json
           output-file: artifacts/security/sbom.spdx.json
+          syft-version: v1.42.3
+          upload-release-assets: false
 
       - name: Generate integrity manifest
         shell: bash
