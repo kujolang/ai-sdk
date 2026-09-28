@@ -14,6 +14,21 @@ This project gives you a single, normalized response contract across configured 
 
 Prioritize copyable examples over tests: examples should model the most token-efficient idioms we want agents to imitate.
 
+## Release runtime and installation
+
+AI SDK 1.1.1 supports Kujo 1.6.0 or newer. Install with Kennel 1.1.0 or newer:
+
+```bash
+kennel add ai-sdk@1.1.1
+kennel install
+```
+
+Response, provider-driver and model-catalog contracts retain their existing
+1.0.0 identities. Kujo 1.5.0 compatibility CI covers a limited contract subset;
+it is not certification of every optional integration on the older runtime.
+Provider secrets are never needed for deterministic offline fixtures. Official
+release validation additionally requires the documented live-provider smoke.
+
 ## Why This Exists
 
 - Keep application code provider-agnostic.

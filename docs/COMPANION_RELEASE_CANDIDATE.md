@@ -9,7 +9,7 @@ Validated locally with the published macOS x64 Kujo 1.6.0 binary:
 Its source is `44af277848173664f72ca85f2a1b3b98d634ecdd`.
 This does not certify other platforms; hosted candidate checks must be inspected separately.
 
-Local release quality gate: 150 aggregate tests, schema checks, wrapper regressions, examples and benchmarks passed. Live-provider smoke was skipped by the local runner because no provider key was configured. This is not live-provider release evidence. Publication is blocked until the mandatory release provider smoke passes; the manual workflow skip option has not been authorized. Supply-chain policy passed. Compatibility CI covers immutable Kujo 1.5.0 and 1.6.0 release sources.
+Local release quality gate: 150 aggregate tests, schema checks, wrapper regressions, examples and benchmarks passed. Live-provider smoke was skipped by the local runner because no provider key was configured. This is not live-provider release evidence. Publication is blocked until the mandatory release provider smoke passes; the manual workflow skip option has not been authorized. Supply-chain policy passed. Compatibility CI uses published Kujo 1.5.0 and 1.6.0 binaries through an immutable checksum-verifying setup action. The full release gate targets 1.6.0.
 
 ## Release completion checklist
 
