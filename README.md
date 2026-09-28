@@ -27,7 +27,9 @@ Response, provider-driver and model-catalog contracts retain their existing
 1.0.0 identities. Kujo 1.5.0 compatibility CI covers a limited contract subset;
 it is not certification of every optional integration on the older runtime.
 Provider secrets are never needed for deterministic offline fixtures. Official
-release validation additionally requires the documented live-provider smoke.
+release validation normally requires the documented live-provider smoke. For
+1.1.1 only, the maintainer explicitly deferred that check to the next pass; no
+live-provider result is claimed. See [the release waiver](docs/RELEASE_1_1_1.md).
 
 ## Why This Exists
 
