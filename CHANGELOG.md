@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.1 — candidate
+
+- Normalize thrown transport failures, preserve cleanup, and redact credential-bearing provider errors.
+- Validate model-catalog identity and shape; retain response and provider-driver contract 1.0.0.
+- Add bounded Watchdog metadata mapping without telemetry authority.
+- Validate on published Kujo 1.6.0 source; restore reachable immutable CI runtime pins.
+- Release remains pending mandatory live-provider validation.
+
+
 ## 1.1.0 - 2026-08-26
 
 - Added provider-driver contract 1.0.0 and additive Kennel exports.

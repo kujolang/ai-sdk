@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      KUJO_RUNTIME_REF: "7819d1475e909ec88f510c9927445791ea928836"
+      KUJO_RUNTIME_REF: "44af277848173664f72ca85f2a1b3b98d634ecdd"
 
     steps:
       - name: Checkout repository
@@ -50,7 +50,7 @@ jobs:
     timeout-minutes: 30
     needs: release-contracts
     env:
-      KUJO_RUNTIME_REF: "7819d1475e909ec88f510c9927445791ea928836"
+      KUJO_RUNTIME_REF: "44af277848173664f72ca85f2a1b3b98d634ecdd"
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
