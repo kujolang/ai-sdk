@@ -14,8 +14,8 @@ for workflow_file in "${WORKFLOW_FILES[@]}"; do
 		exit 1
 	fi
 
-	if ! grep -Eq 'KUJO_RUNTIME_REF:[[:space:]]*"[0-9a-f]{40}"' "$workflow_file"; then
-		echo "Missing or invalid KUJO_RUNTIME_REF pin in $workflow_file"
+	if ! grep -Eq 'uses: kujolang/kujo/\.github/actions/setup-kujo@[0-9a-f]{40}' "$workflow_file" || ! grep -Eq 'version: v1\.6\.0$' "$workflow_file"; then
+		echo "Missing pinned setup action or exact Kujo release in $workflow_file"
 		exit 1
 	fi
 done

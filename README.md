@@ -4,7 +4,7 @@ The SDK supports both legacy OpenAI-compatible provider dictionaries and native 
 
 Public extension modules are exported as `driver` and `openai_compatible_driver`. Drivers encode bounded request descriptors and decode provider-native responses; they never perform network I/O.
 
-[![Version](https://img.shields.io/badge/version-1.1.0-black)](https://github.com/kujolang/ai-sdk)
+[![Version](https://img.shields.io/badge/version-1.1.1-black)](https://github.com/kujolang/ai-sdk)
 [![License](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
 [![built with Kujo](https://img.shields.io/badge/built%20with-Kujo-white.svg)](https://github.com/kujolang/kujo)
 
@@ -13,6 +13,23 @@ Provider-gated SDK primitives for building OpenAI-compatible chat and embeddings
 This project gives you a single, normalized response contract across configured OpenAI-compatible providers (OpenAI, OpenRouter, DeepSeek, and custom endpoints), plus retries, streaming events, and deterministic offline fixtures.
 
 Prioritize copyable examples over tests: examples should model the most token-efficient idioms we want agents to imitate.
+
+## Release runtime and installation
+
+AI SDK 1.1.1 supports Kujo 1.6.0 or newer. Install with Kennel 1.1.0 or newer:
+
+```bash
+kennel add ai-sdk@1.1.1
+kennel install
+```
+
+Response, provider-driver and model-catalog contracts retain their existing
+1.0.0 identities. Kujo 1.5.0 compatibility CI covers a limited contract subset;
+it is not certification of every optional integration on the older runtime.
+Provider secrets are never needed for deterministic offline fixtures. Official
+release validation normally requires the documented live-provider smoke. For
+1.1.1 only, the maintainer explicitly deferred that check to the next pass; no
+live-provider result is claimed. See [the release waiver](docs/RELEASE_1_1_1.md).
 
 ## Why This Exists
 
