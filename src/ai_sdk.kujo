@@ -1993,7 +1993,7 @@ func embeddings_impl(client, input_value, options) {
 					fallback_client := create_client_impl(fallback_provider, fallback_api_key)
 					override_options := dict_get_or(entry, "options", null)
 					fallback_options := merge_fallback_options(primary_options, override_options)
-					fallback_result := embeddings_impl(fallback_client, input_value, fallback_options)
+					fallback_result := fallback_request(fallback_client, input_value, fallback_options, true)
 					fallback_result["fallback"] := {
 						"used": true,
 						"index": i,
@@ -3223,7 +3223,7 @@ func chat_completion_impl(client, messages, options) {
 					fallback_client := create_client_impl(fallback_provider, fallback_api_key)
 					override_options := dict_get_or(entry, "options", null)
 					fallback_options := merge_fallback_options(primary_options, override_options)
-					fallback_result := chat_completion_impl(fallback_client, messages, fallback_options)
+					fallback_result := fallback_request(fallback_client, messages, fallback_options, false)
 					fallback_result["fallback"] := {
 						"used": true,
 						"index": i,
@@ -3557,6 +3557,16 @@ func strict_request(client, input_value, options, embedding) {
   return standard_error_response_impl(client, "state_backend_error", "Atomic governance operation failed; reconcile backend state before retrying.", 0, null, false)
  }
  return result
+}
+
+# Fallback overrides are a new option boundary. Strict ownership cannot change
+# scope mid-chain; legacy fallback must still honor backend and mode validation.
+func fallback_request(client, input_value, options, embedding) {
+ resolved := resolve_chat_options(client, options)
+ if dict_get_or(resolved, "governance_mode", "best_effort") == "strict" {
+  return standard_error_response_impl(client, "state_backend_error", "Strict governance cannot be enabled through provider fallback.", 0, null, false)
+ }
+ return strict_request(client, input_value, options, embedding)
 }
 
 func guarded_chat(client, messages, options) { return strict_request(client, messages, options, false) }

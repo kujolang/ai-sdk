@@ -1,0 +1,95 @@
+test_setup {
+ from src.providers import openai_provider
+ from src.ai_sdk import create_client, chat_completion, embeddings, chat_completion_stream, atomic_memory_backend
+}
+
+test "chat fallback cannot bypass governance validation" {
+ for mode in ["strict", "best_effort", "invalid"] {
+  backend := atomic_memory_backend()
+  if mode != "best_effort" { backend["requires_strict"] = false }
+  assert_true(backend["acquire"]("n", "existing-owner"))
+  marker := "fallback-test:" + uuid_v4()
+  shared_set(marker, 0)
+  client := create_client(openai_provider(), "key")
+  options := {"max_retries": 0,
+   "transport": func(u, o) { return Ok({"_status": 503, "_body": "{}"}) },
+   "fallback_providers": [
+    {"provider": openai_provider(), "options": {
+     "governance_mode": mode, "state_backend": backend, "rolling_token_budget_tokens": 100,
+     "transport": func(u, o) {
+      shared_add_int(marker, 1)
+      return Ok({"_status": 200, "_body": "{\"choices\":[{\"message\":{\"content\":\"ok\"}}],\"data\":[{\"embedding\":[1.0],\"index\":0}],\"usage\":{\"total_tokens\":1}}"})
+     }}},
+    {"provider": openai_provider(), "options": {"offline_fixture": true}}
+   ]}
+  result := chat_completion(client, [], options)
+  assert_false(result["ok"])
+  assert_equal(result["error"]["code"], "state_backend_error")
+  assert_false(result["error"]["retryable"])
+  assert_equal(shared_get(marker), 0)
+  assert_equal(backend["get"]("ai_sdk:openai:governance_tokens_used", 0), 0)
+  assert_true(backend["release"]("n", "existing-owner", true))
+  shared_delete(marker)
+ }
+}
+
+test "embeddings fallback cannot bypass governance validation" {
+ for mode in ["strict", "best_effort", "invalid"] {
+  backend := atomic_memory_backend()
+  if mode != "best_effort" { backend["requires_strict"] = false }
+  assert_true(backend["acquire"]("n", "existing-owner"))
+  marker := "fallback-test:" + uuid_v4()
+  shared_set(marker, 0)
+  client := create_client(openai_provider(), "key")
+  options := {"max_retries": 0,
+   "transport": func(u, o) { return Ok({"_status": 503, "_body": "{}"}) },
+   "fallback_providers": [
+    {"provider": openai_provider(), "options": {
+     "governance_mode": mode, "state_backend": backend, "rolling_token_budget_tokens": 100,
+     "transport": func(u, o) {
+      shared_add_int(marker, 1)
+      return Ok({"_status": 200, "_body": "{\"choices\":[{\"message\":{\"content\":\"ok\"}}],\"data\":[{\"embedding\":[1.0],\"index\":0}],\"usage\":{\"total_tokens\":1}}"})
+     }}},
+    {"provider": openai_provider(), "options": {"offline_fixture": true}}
+   ]}
+  result := embeddings(client, "x", options)
+  assert_false(result["ok"])
+  assert_equal(result["error"]["code"], "state_backend_error")
+  assert_false(result["error"]["retryable"])
+  assert_equal(shared_get(marker), 0)
+  assert_equal(backend["get"]("ai_sdk:openai:governance_tokens_used", 0), 0)
+  assert_true(backend["release"]("n", "existing-owner", true))
+  shared_delete(marker)
+ }
+}
+
+test "stream fallback cannot bypass governance validation" {
+ for mode in ["strict", "best_effort", "invalid"] {
+  backend := atomic_memory_backend()
+  if mode != "best_effort" { backend["requires_strict"] = false }
+  assert_true(backend["acquire"]("n", "existing-owner"))
+  marker := "fallback-test:" + uuid_v4()
+  shared_set(marker, 0)
+  client := create_client(openai_provider(), "key")
+  options := {"max_retries": 0,
+   "transport": func(u, o) { return Ok({"_status": 503, "_body": "{}"}) },
+   "fallback_providers": [
+    {"provider": openai_provider(), "options": {
+     "governance_mode": mode, "state_backend": backend, "rolling_token_budget_tokens": 100,
+     "transport": func(u, o) {
+      shared_add_int(marker, 1)
+      return Ok({"_status": 200, "_body": "{\"choices\":[{\"message\":{\"content\":\"ok\"}}],\"data\":[{\"embedding\":[1.0],\"index\":0}],\"usage\":{\"total_tokens\":1}}"})
+     }}},
+    {"provider": openai_provider(), "options": {"offline_fixture": true}}
+   ]}
+  result := chat_completion_stream(client, [], options, func(event) {})
+  assert_false(result["ok"])
+  assert_equal(result["error"]["code"], "state_backend_error")
+  assert_false(result["error"]["retryable"])
+  assert_equal(shared_get(marker), 0)
+  assert_equal(backend["get"]("ai_sdk:openai:governance_tokens_used", 0), 0)
+  assert_true(backend["release"]("n", "existing-owner", true))
+  shared_delete(marker)
+ }
+}
+

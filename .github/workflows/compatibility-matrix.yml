@@ -44,3 +44,12 @@ jobs:
 
       - name: Run feature smoke suite
         run: ./kujo test-run tests/feature_smoke_tests.kujo
+
+      - name: Run state and transport hardening regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./kujo test-run tests/state_persistence_tests.kujo
+          ./kujo test-run tests/atomic_accounting_tests.kujo
+          ./kujo test-run tests/fallback_governance_tests.kujo
+          ./kujo test-run tests/transport_policy_tests.kujo

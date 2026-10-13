@@ -100,3 +100,7 @@ The additive `governance_mode` option defaults to `best_effort`, preserving exis
 ### Runtime transport follow-up
 
 Native downloads now enforce configured positive raw response limits during reading, with the existing 8 MiB runtime ceiling. Size-limit failures are terminal `response_too_large`. Endpoint allowlist mode disables redirects; the additive `redirects` option otherwise defaults to the previous follow behavior. Raw HTTP error envelopes omit native byte buffers to retain JSON compatibility. Additive `on_transport_chunk` exposes UTF-8-safe observed text on patched runtimes; published 1.5/1.6 reject opt-in collection before I/O while ordinary APIs retain compatibility. Existing normalized streaming callback order is unchanged. See README for callback cancellation, partial delivery and custom transport boundaries.
+
+### Fallback governance validation follow-up
+
+Fallback entry overrides now pass the same mode/backend validation as public calls. Strict mode remains incompatible with a provider fallback chain, including when introduced by an entry override. Unknown modes and atomic-only backends in best-effort mode return terminal `state_backend_error` before fallback transport or accounting. The primary call may already have failed before an invalid fallback is reached. Valid best-effort fallback and the 1.0.0 response shape remain unchanged.
