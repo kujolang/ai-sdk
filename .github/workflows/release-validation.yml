@@ -43,8 +43,8 @@ jobs:
           bash scripts/release_quality_gates.sh
 
   release-live-provider-smoke:
-    # Maintainer-authorized waiver for this immutable release only; see docs/RELEASE_1_1_1.md.
-    if: ${{ github.event_name != 'release' || github.event.release.tag_name != 'v1.1.1' }}
+    # Explicit maintainer waivers for these tags only; see docs/RELEASE_1_1_1.md and docs/RELEASE_1_2_0.md.
+    if: ${{ github.event_name != 'release' || (github.event.release.tag_name != 'v1.1.1' && github.event.release.tag_name != 'v1.2.0') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: release-contracts

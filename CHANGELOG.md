@@ -21,7 +21,7 @@
 
 - Full local release gates pass on Kujo 1.5.0 and 1.6.0: 185 Kujo tests each, plus wrapper/HTTP checks, schemas, examples, docs, and benchmarks.
 - Minimum Kujo version remains 1.6.0; response, driver, and catalog contracts remain 1.0.0. Existing best-effort accounting and buffered streaming remain supported.
-- See [release evidence and runtime requirements](docs/RELEASE_1_2_0.md). Live-provider release evidence is pending.
+- See [release evidence and runtime requirements](docs/RELEASE_1_2_0.md). The maintainer explicitly waived live-provider smoke for 1.2.0 only; no live-provider result is claimed.
 
 ## 1.1.1 — 2026-09-28
 

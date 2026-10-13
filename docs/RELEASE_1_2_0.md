@@ -33,4 +33,6 @@ The 185-test local release gate passes on both published Kujo 1.5.0 and 1.6.0, w
 
 See [the hardening audit](audits/repository-hardening.md) for exact commands, commits, runtime hashes, and before/after regression evidence.
 
-Live-provider release evidence is pending. The 1.1.1 waiver does not apply to this release. Publishing requires a successful configured-provider smoke test or an explicit maintainer decision for 1.2.0; no live-provider success is claimed here.
+## One-release live-provider waiver
+
+On October 13, 2026, the maintainer explicitly authorized publishing 1.2.0 without live-provider smoke evidence. This waiver applies only to tag `v1.2.0`. No live-provider success is claimed. Contract, compatibility, benchmark, schema, documentation, and supply-chain checks remain required. Other future release tags still require configured-provider evidence unless separately authorized.
