@@ -1,64 +1,45 @@
 # AI SDK
 
-The SDK supports both legacy OpenAI-compatible provider dictionaries and native provider drivers. Existing provider factories and custom OpenAI-compatible usage are unchanged: a provider without `driver` automatically uses the built-in OpenAI-compatible driver. Native packages attach a validated `ai-sdk-provider-driver` 1.0.0 function bundle; core continues to own transport, security, retries, governance, and normalized response contract 1.0.0.
-
-Public extension modules are exported as `driver` and `openai_compatible_driver`. Drivers encode bounded request descriptors and decode provider-native responses; they never perform network I/O.
-
-[![Version](https://img.shields.io/badge/version-1.1.1-black)](https://github.com/kujolang/ai-sdk)
+[![Version](https://img.shields.io/badge/version-1.2.0-black)](https://github.com/kujolang/ai-sdk/releases/tag/v1.2.0)
 [![License](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
 [![built with Kujo](https://img.shields.io/badge/built%20with-Kujo-white.svg)](https://github.com/kujolang/kujo)
 
-Provider-gated SDK primitives for building OpenAI-compatible chat and embeddings integrations in Kujo.
+Call chat and embedding models from Kujo through one response contract. AI SDK handles provider requests, retries, timeouts, streaming events, usage accounting, and offline fixtures.
 
-This project gives you a single, normalized response contract across configured OpenAI-compatible providers (OpenAI, OpenRouter, DeepSeek, and custom endpoints), plus retries, streaming events, and deterministic offline fixtures.
+Use the OpenAI, OpenRouter, or DeepSeek presets, a custom OpenAI-compatible endpoint, or a native provider driver. Existing provider dictionaries work without a `driver` field. Native drivers encode requests and decode responses; the SDK owns network I/O, security checks, retries, and accounting.
 
-Prioritize copyable examples over tests: examples should model the most token-efficient idioms we want agents to imitate.
+## Install
 
-## Release runtime and installation
-
-AI SDK 1.1.1 supports Kujo 1.6.0 or newer. Install with Kennel 1.1.0 or newer:
+AI SDK 1.2.0 requires Kujo 1.6.0 or newer. Install with Kennel 1.1.0 or newer:
 
 ```bash
-kennel add ai-sdk@1.1.1
+kennel add ai-sdk@1.2.0
 kennel install
 ```
 
-Response, provider-driver and model-catalog contracts retain their existing
-1.0.0 identities. Kujo 1.5.0 compatibility CI covers a limited contract subset;
-it is not certification of every optional integration on the older runtime.
-Provider secrets are never needed for deterministic offline fixtures. Official
-release validation normally requires the documented live-provider smoke. For
-1.1.1 only, the maintainer explicitly deferred that check to the next pass; no
-live-provider result is claimed. See [the release waiver](docs/RELEASE_1_1_1.md).
+The response, provider-driver, and model-catalog contracts remain at 1.0.0. The full local release gates also pass on Kujo 1.5.0, though the declared minimum remains 1.6.0. Offline fixtures need no provider key.
 
-## Why This Exists
+Version 1.2.0 adds persistent process-local state, optional strict concurrent accounting, and native redirect/download controls. Incremental transport callbacks require a runtime with `http_stream_collect`; published Kujo 1.5.0 and 1.6.0 reject that option before network I/O. Existing buffered streaming still works. See [the release notes](docs/RELEASE_1_2_0.md) for compatibility and verification details.
 
-- Keep application code provider-agnostic.
-- Normalize success and error shapes for easier downstream handling.
-- Reduce API-specific glue code in every service.
-- Support local and CI development without secrets via fixture mode.
+## Start here
 
-This repository is library-first: import `src/ai_sdk.kujo` and `src/providers.kujo` into Kujo workflows, or use the bundled example app for a runnable entrypoint. It does not expose a separate user-facing CLI.
+Import `src/ai_sdk.kujo` and `src/providers.kujo` into your application, or run the bundled example below. AI SDK is a library and has no separate CLI. The `driver` and `openai_compatible_driver` exports support provider extensions.
 
-New here? Start with the [Adoption Guide](docs/ADOPTION_GUIDE.md), which maps every SDK feature to the security, reliability, observability, cost, and CI concern it addresses, then add your own endpoint with the [Build Your First Provider](docs/BUILD_YOUR_FIRST_PROVIDER.md) walkthrough.
+Read the [adoption guide](docs/ADOPTION_GUIDE.md) for operational controls or [build your first provider](docs/BUILD_YOUR_FIRST_PROVIDER.md) for a custom endpoint.
 
-## Launch Readiness Position
-
-AI SDK is a release-candidate-oriented enterprise-hardening baseline, not a blanket production certification for every environment.
-
-It is designed to support production-adjacent validation work: deterministic fixtures, normalized contracts, retries, fallback providers, timeouts, breaker controls, host allowlists, redaction, governance budgets, CI release gates, and schema checks are already present. Before adopting it in a regulated or large-scale deployment, teams must still pin provider/runtime versions, configure live-provider smoke evidence, review outbound host policy, wire observability hooks, set tenant-appropriate token/cost budgets, and run the release gates in their own CI.
+Before deployment, test your chosen provider, pin package and runtime versions, set endpoint and usage policies, and connect observability hooks. Offline tests verify SDK behavior; they do not certify a provider or deployment environment.
 
 ## Highlights
 
 - Provider presets with capability metadata.
-- Unified request payload builder.
+- Shared request payload builder.
 - Normalized response contract (success + error).
 - Retry/backoff for retryable transport and HTTP failures.
 - Streaming callback API (`delta`, `done`, `error`).
 - Timeout, circuit-breaker, fallback-provider, and governance budget controls.
 - Endpoint allowlist and protected-header policy controls.
 - Deterministic fixture mode for offline development.
-- Contract schemas, release gates, benchmark guardrails, and stress harness included.
+- Contract schemas, release checks, benchmarks, and a stress harness.
 
 ## Requirements
 
@@ -118,7 +99,7 @@ The provider preset defines which environment variable is read for credentials.
 
 ## Operational Quickstart Profile
 
-Use this as a provider-gated operational baseline for both chat and embeddings:
+Start with these request limits for chat and embeddings, then adjust them for your workload:
 
 ```kujo
 from src.providers import openai_provider
@@ -665,7 +646,7 @@ kujo run scripts/stress_harness.kujo
 - Document any breaking contract changes in this README.
 - CI installs the published Kujo 1.6.0 runtime through an immutable checksum-verifying setup action.
 - Runtime compatibility checks also run through .github/workflows/compatibility-matrix.yml for Kujo 1.5.0 and 1.6.0.
-- Release validation runs via .github/workflows/release-validation.yml with deterministic contract checks plus optional live-provider smoke validation when provider secrets are configured.
+- `.github/workflows/release-validation.yml` runs contract checks and requires live-provider smoke evidence for published releases.
 - Release/prerelease events require live-provider smoke evidence (provider secret required), with manual-only override on `workflow_dispatch`.
 - Release quality thresholds are enforced via scripts/release_quality_gates.sh.
 
@@ -679,6 +660,8 @@ Run `KUJO_BIN="$(command -v kujo)" bash scripts/release_quality_gates.sh` for al
 
 The `./kujo` compatibility wrapper stages execution into a temporary repository copy and removes it on normal success/failure. Generated files in that copy are temporary; use the installed `kujo` command to keep generated outputs in this checkout.
 
+## State and accounting
+
 Legacy `best_effort` `state_backend` hooks fall back to client-local state when reads fail and ignore write-hook exceptions. Their read/modify/write sequence is not atomic across processes. Treat these controls as best-effort accounting, not a strict distributed spending limit; use external serialized admission when strict enforcement is required.
 
 Completed provider usage is charged through the configured state backend before rolling-budget rejection or structured-output validation. Structured-output retries recheck rolling budgets before sending another request. Native embedding encoders receive the original `input` value. Streaming usage metadata is retained across frames that omit usage or report `null`.
@@ -689,7 +672,7 @@ A `{state: {...}}` backend supplies seeds and retains writes per client and name
 
 Import `client_state`, `reset_client_state`, and `reset_memory_state_backend` from `ai_sdk` for inspection and lifecycle cleanup. `reset_client_state(client)` releases that client's stored counters and dictionary-backend state, restoring configured seeds; it returns false while requests are active or when no bucket exists. It does not clear a shared registry. `reset_memory_state_backend({registry_id: "my-service"})` clears that registry across namespaces; call it only after all participating requests stop, and reset participating clients too if their local fallback counters should start over. Storage lasts until explicit cleanup or process exit, with no automatic eviction that could silently reset budgets.
 
-These legacy memory operations fix sequential persistence, including reentrant admission checks. Their compound read/modify/write operations remain non-atomic; use externally serialized admission for strict concurrent or distributed limits. They do not provide disk persistence.
+These legacy memory operations fix sequential persistence, including reentrant admission checks. Their compound read/modify/write operations remain non-atomic. Use strict mode below for concurrent accounting, with a durable, fenced backend when sharing budgets across processes. They do not provide disk persistence.
 
 ### Atomic concurrent accounting
 

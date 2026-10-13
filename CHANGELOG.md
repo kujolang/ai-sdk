@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.2.0 — 2026-10-13
+
+### Added
+
+- Process-local client state inspection and cleanup with `client_state`, `reset_client_state`, and `reset_memory_state_backend`.
+- Optional strict concurrent accounting and `atomic_memory_backend()`, with exclusive ownership and quarantine after uncertain writes.
+- `redirects` policy and optional `on_transport_chunk` callbacks on runtimes with readable HTTP collection. Published Kujo 1.5/1.6 retain ordinary calls and reject the callback option before I/O.
+
+### Fixed
+
+- Retain governance, breaker, admission, and trace counters across value-copied client calls.
+- Charge completed token/cost usage before budget or structured-output rejection, and recheck budgets before retries.
+- Pass original embedding input to native encoders and finalize rejected descriptors without leaking admission slots.
+- Preserve streaming cache/reasoning usage metadata across frames without usage.
+- Enforce native download limits, prevent redirects under endpoint allowlists, and keep HTTP error envelopes JSON-serializable.
+- Revalidate fallback governance overrides before transport or accounting.
+
+### Verification and compatibility
+
+- Full local release gates pass on Kujo 1.5.0 and 1.6.0: 185 Kujo tests each, plus wrapper/HTTP checks, schemas, examples, docs, and benchmarks.
+- Minimum Kujo version remains 1.6.0; response, driver, and catalog contracts remain 1.0.0. Existing best-effort accounting and buffered streaming remain supported.
+- See [release evidence and runtime requirements](docs/RELEASE_1_2_0.md). Live-provider release evidence is pending.
+
 ## 1.1.1 — 2026-09-28
 
 - Normalize thrown transport failures, preserve cleanup, and redact credential-bearing provider errors.
@@ -22,20 +45,9 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and this project follows semantic versioning for package versions.
 
-## [Unreleased]
+## Earlier hardening included in 1.1.1
 
-### Fixed
-
-- Enforce native download bounds and disable redirects under endpoint allowlists; add opt-in runtime chunk callbacks without changing buffered response contracts.
-
-- Add opt-in strict atomic governance for concurrent accounting, with an in-memory backend, fail-closed hook validation, quarantine and guarded chat/embedding/stream requests; preserve legacy best-effort defaults.
-
-- Persist process-local governance, breaker, admission, and trace counters across value-copied client calls on Kujo 1.5 and 1.6; add state inspection and explicit cleanup APIs.
-
-- Forward original embedding input to native provider encoders and finalize descriptor failures with zero-attempt observability.
-- Preserve streaming cache/reasoning usage metadata across frames without usage.
-- Persist completed token/cost usage before budget or structured-output rejection, and recheck rolling budgets before retrying structured output.
-- Replace deleted documentation links and gate local guide links and the new regression tests.
+The entries below were already present in the 1.1.1 source tree.
 
 ### Added
 
