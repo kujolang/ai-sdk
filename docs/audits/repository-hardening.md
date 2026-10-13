@@ -1,3 +1,74 @@
+## Repeat hardening sweep — 2026-10-13
+
+Repository: `kujolang/ai-sdk`, branch `main`. Starting SHA: `cd71f68184318eee9f57e4ca8840dca087f01c83`. Implementation ending SHA: `c23781d9f0d71a614ffc30078c5c3bbc7686c169`; the following documentation-only commit records this receipt. Scope remains the SDK; no sibling repository or published runtime was changed.
+
+The SDK normalizes provider chat/embeddings, streaming, retries, governance, model metadata and Watchdog telemetry. This pass rechecked the request/fallback lifecycle, strict and legacy state ownership, native HTTP policy, provider descriptors and credentials, stream parsing/normalization, catalog generation, telemetry projection, wrapper staging/cleanup, dependency manifests, CI and release scripts. Existing public decoders and legacy best-effort semantics remain compatibility boundaries. Drivers are trusted executable dependencies; core owns transport and accounting. Kujo supplies HTTP and process-local shared storage; there are no package dependencies to remove.
+
+### Verified changes
+
+| Problem / root cause | Implementation and files | Proof / compatibility |
+| --- | --- | --- |
+| **P1 resolved:** fallback entry options could select strict governance, an atomic-only backend in best-effort mode, or an unknown mode while bypassing the public guard. Direct recursion into the request implementation allowed provider calls and accounting despite another owner holding the backend | Route chat and embedding fallback through a common `fallback_request` boundary in `src/ai_sdk.kujo`. Reject strict fallback and reuse public mode/backend validation | `tests/fallback_governance_tests.kujo`: chat, embeddings and normalized streaming each exercise all three override modes. Assert terminal `state_backend_error`, zero fallback transport calls, no usage write, preserved lock ownership and no later-provider escape. All three tests fail on the starting SHA on both published runtimes and pass after the fix |
+| Runtime compatibility CI omitted recent state and transport regressions | Add persistence, atomic accounting, fallback governance and transport-policy suites to `.github/workflows/compatibility-matrix.yml`; add the new suite to `scripts/release_quality_gates.sh`, raising aggregate floor 182 → 185 | Existing tests/thresholds are retained. The local full gates pass on both versions; hosted CI was not executed locally |
+
+README and API contract policy now make the fallback override boundary explicit. Public signatures, exports, contract versions, CLI behavior, file formats, schemas, environment variables, dependency surface and accepted configuration keys are unchanged. Only invalid fallback governance combinations now fail closed. A primary request may already have failed before a fallback is reached; valid best-effort fallback still works. No changes are required in consumers or Kujo backports.
+
+### Verification and measurements
+
+Evidence directory: ignored local `artifacts/sweep-2026-10-13/`. Published runtime paths and hashes are the same as the transport receipt below.
+
+| Check | Baseline | Final |
+| --- | --- | --- |
+| Full release gates, Kujo 1.5.0 | 182 Kujo tests pass | 185 pass |
+| Full release gates, Kujo 1.6.0 | 182 Kujo tests pass | 185 pass |
+| New fallback regressions staged into starting SHA | 0/3 on each runtime | 3/3 on each runtime, covering nine combinations |
+| Wrapper / native HTTP harness, each published runtime | 2 wrapper tests; 4 HTTP tests pass, 2 readable-consumer-only skips | Same passes and explicit capability skips |
+| Docs, examples, response schemas, six benchmark gates | Pass | Pass with unchanged thresholds |
+
+The source-backport binaries from the preceding transport task additionally pass all three new fallback regressions and all six native HTTP tests each, with readable collection required (no skips). Those HTTP tests include VM/interpreter execution. Backport binaries were reused by exact path under `/tmp/ai-sdk-transport-binaries/`; no rebuild or new runtime claim is implied. Their focused Kujo tests use the already documented `RUST_MIN_STACK=16777216` debug-build setting.
+
+Representative existing benchmark latency (ms per operation; baseline → final):
+
+| Case | Kujo 1.5 | Kujo 1.6 | Existing maximum |
+| --- | --- | --- | --- |
+| Chat normalization | 8.837 → 2.977 | 5.330 → 2.283 | 30 |
+| Stream parsing/normalization | 13.420 → 3.820 | 7.527 → 3.150 | 40 |
+| Chat retry | 8.515 → 1.970 | 3.650 → 1.665 | 50 |
+
+These are load-sensitive verification samples, **not a speedup claim**: the change only adds validation to fallback attempts. No token savings, memory reduction, payload reduction or throughput improvement is claimed. Existing response-size bounds and explicit memory lifecycle remain. Wrapper staging still preserves arbitrary repository inputs; excluding ignored files without a compatibility contract was not justified. No new cache, dependency, log channel or model-visible context was added; verbose evidence stays in artifacts.
+
+Commands (exit 0 unless explicitly noted):
+
+```sh
+# Each command ran before and after the change, serially.
+KUJO_BIN=/Users/robertdevore/.local/bin/kujo bash scripts/release_quality_gates.sh
+KUJO_BIN="$PWD/artifacts/audit-2026-10-12/runtime16/kujo" bash scripts/release_quality_gates.sh
+# New tests copied into a temporary git archive of the starting SHA:
+# both published binaries: test-run tests/fallback_governance_tests.kujo
+# Expected exit 1, 0/3 passing; logs fallback-final-before15.log / ...16.log.
+KUJO_BIN=/Users/robertdevore/.local/bin/kujo ./kujo test-run tests/fallback_governance_tests.kujo
+KUJO_BIN="$PWD/artifacts/audit-2026-10-12/runtime16/kujo" ./kujo test-run tests/fallback_governance_tests.kujo
+# For version=15 and version=16:
+KUJO_BIN="/tmp/ai-sdk-transport-binaries/kujo${version}-patched" RUST_MIN_STACK=16777216 ./kujo test-run tests/fallback_governance_tests.kujo
+KUJO_BIN="/tmp/ai-sdk-transport-binaries/kujo${version}-patched" KUJO_REQUIRE_STREAM_COLLECT=1 python3 tests/runtime_transport_tests.py
+bash scripts/supply_chain_policy_check.sh
+bash scripts/verify_docs.sh
+bash -n scripts/release_quality_gates.sh
+git diff --check
+KUJO_BIN=/Users/robertdevore/.local/bin/kujo ./kujo run examples/model_preferences.kujo
+KUJO_BIN=/Users/robertdevore/.local/bin/kujo ./kujo run scripts/generate_model_catalog.kujo --interpreter -- examples/dispatch-model-catalog.config.json --output /tmp/ai-sdk-sweep-catalog.json
+KUJO_BIN=/Users/robertdevore/.local/bin/kujo ./kujo run examples/telemetry_bridge.kujo --interpreter
+```
+
+### Remaining scope
+
+- No unresolved P0/P1/P2 finding or cross-repository requirement was admitted by this repeat sweep. This is not a claim of exhaustive absence of defects.
+- **Needs more evidence:** hosted CI/other operating systems, paid-provider conformance and external distributed backend fencing were not exercised. The local suite's live-provider smoke remains fixture-safe when secrets are absent.
+- **Not worth changing in this pass:** broad decoder/module rewrites, public compatibility API removal, catalog sorting changes without a measured workload, or wrapper exclusions that could omit runtime assets.
+- No new SignalBox capture is warranted for the completed fix or routine verification. Earlier report sections retain historical findings and are superseded by their corresponding follow-ups.
+
+---
+
 ## Runtime transport follow-up — 2026-10-13
 
 Scope: `kujolang/ai-sdk` main, starting `e28a57469e366b3f8265270f05f5cb00eee9b3a3`, implementation ending `541bcd2`; the user explicitly authorized Kujo runtime changes and source backports. Runtime main starts at `6695bd9beac4787c9d2db768e9f61dfdb26a95a5` and ends at `d6ed9c0cfa76a1f17fb87020b9e9a77950c7fc25`. Source backports are `302bbb19ac4fb661843e4e2e3d633f7bae5d794b` on `codex/http-stream-consumer-1.5` (base `v1.5.0`, `cc2d7dbb59a8dc05f00d629e100932f56f4062f6`) and `92e0e0a8125da5d005c1e4f5f9a9784f436158a9` on `codex/http-stream-consumer-1.6` (base `v1.6.0`, `44af277848173664f72ca85f2a1b3b98d634ecdd`). Release tags and published binaries are unchanged.
