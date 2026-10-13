@@ -62,10 +62,10 @@ bash scripts/verify_docs.sh
 python3 tests/wrapper_regression_tests.py
 
 TOTAL_TEST_COUNT=0
-MIN_TOTAL_TEST_FLOOR=125
+MIN_TOTAL_TEST_FLOOR=155
 
 run_test_suite_with_floor tests/model_catalog_tests.kujo 10
-run_test_suite_with_floor tests/hardening_regression_tests.kujo 2
+run_test_suite_with_floor tests/hardening_regression_tests.kujo 7
 run_test_suite_with_floor tests/provider_driver_contract_tests.kujo 5
 run_test_suite_with_floor tests/openai_compatible_driver_regression_tests.kujo 4
 run_test_suite_with_floor tests/external_driver_fixture_tests.kujo 5

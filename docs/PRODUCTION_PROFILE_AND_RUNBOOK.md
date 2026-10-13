@@ -4,6 +4,10 @@
 
 Treat external driver packages as executable dependencies. Review and pin them and run conformance/security tests. Core validates host/scheme, protected headers, control characters, credential placement, descriptor shape, response size, semantic results, and retry policy. Drivers cannot select transport or perform I/O. Query authentication and signing remain future work; current descriptors reject query strings.
 
+## State enforcement limits
+
+Use persistent `state_backend.get`/`set` hooks and externally serialized admission for cross-call enforcement. On Kujo 1.5.0, client-local and `state`/`registry_id` dictionary writes do not persist across SDK calls in local probes. Hooks remain non-atomic and fail-open on exceptions; these controls do not provide a strict distributed spending limit. See the [audit](audits/repository-hardening.md) for evidence and remaining design work.
+
 ## Operational Profile
 
 Use these defaults as a starting point for latency-sensitive, high-reliability deployments.

@@ -84,3 +84,7 @@ Before merging contract-affecting changes:
 ## September 2026 hardening clarifications
 
 Normalized contract versions, exports, request options, and environment variables are unchanged. Throwing custom transports now produce non-retryable `transport_error` results instead of escaping the SDK; `Ok`/`Err` transport behavior is unchanged. Error diagnostics redact the configured credential. Catalog authoring rejects malformed config shapes before constructor normalization. Distinct provider/model pairs containing `::` resolve independently; their formerly ambiguous ordering is deterministic. Existing unambiguous catalog hashes are preserved.
+
+## October 2026 hardening clarifications
+
+Public signatures, response versions, schemas, configuration and environment variables remain unchanged. Native embedding drivers now receive the supplied input instead of null. Usage-bearing stream frames retain their normalized metadata through subsequent frames without usage. Descriptor rejection includes zero-attempt observability and runs normal chat finalization. Rolling accounting now persists completed usage before rejecting a budget overrun or invalid structured output; a retry rechecks the remaining budget. Existing persistent backends may therefore record higher, more accurate usage for calls previously rejected after provider completion. This does not introduce atomic distributed reservations.

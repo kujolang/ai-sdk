@@ -15,6 +15,13 @@ The format is based on Keep a Changelog and this project follows semantic versio
 
 ## [Unreleased]
 
+### Fixed
+
+- Forward original embedding input to native provider encoders and finalize descriptor failures with zero-attempt observability.
+- Preserve streaming cache/reasoning usage metadata across frames without usage.
+- Persist completed token/cost usage before budget or structured-output rejection, and recheck rolling budgets before retrying structured output.
+- Replace deleted documentation links and gate local guide links and the new regression tests.
+
 ### Added
 
 - Versioned model-catalog authoring and validation primitives for deterministic orchestrators, plus `scripts/generate_model_catalog.kujo`, a copyable config example, canonical hashing, and duplicate provider/model rejection.

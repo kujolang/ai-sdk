@@ -41,7 +41,7 @@ flowchart TD
 	H -->|Provider error payload| J[Normalize provider_error]
 	H -->|Non-2xx| K[Normalize http_error]
 	H -->|Transport failure| L[Normalize network_error or transport_error]
-	I --> M[Structured output checks and governance post-check]
+	I --> M[Usage accounting then structured output checks]
 	J --> N{Retryable?}
 	K --> N
 	L --> N
@@ -76,7 +76,7 @@ flowchart TD
    Retryable outcomes follow bounded retry policy (`max_retries`, `retry_budget`, delay/jitter controls). Fallback providers are attempted only after retryable primary failure conditions.
 
 6. Governance and completion:
-   Post-response governance checks enforce rolling/request budgets. Final result includes normalized contract fields plus observability counters and trace metadata.
+   Post-response governance records completed usage before checking rolling budgets and structured output. Structured-output retries recheck rolling budgets through the configured backend. Final result includes normalized contract fields plus observability counters and trace metadata.
 
 ## Reliability and Safety Controls
 

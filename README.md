@@ -501,19 +501,15 @@ The root directory intentionally contains only package metadata, license/changel
 - [schemas/contracts/1.0.0](schemas/contracts/1.0.0): Machine-readable response contract schemas for `contract_version` `1.0.0`
 - [docs/ADOPTION_GUIDE.md](docs/ADOPTION_GUIDE.md): Feature-to-enterprise-concern map, including provider-key and secret hygiene guidance
 - [docs/BUILD_YOUR_FIRST_PROVIDER.md](docs/BUILD_YOUR_FIRST_PROVIDER.md): One-page walkthrough from custom provider to fixture/live validation
-- [docs/RELEASE_CANDIDATE_CHECKLIST.md](docs/RELEASE_CANDIDATE_CHECKLIST.md): Exact local command sequence for validating a release
 - [docs/PROVIDER_EXTENSION_GUIDE.md](docs/PROVIDER_EXTENSION_GUIDE.md): How to add provider presets and validate capabilities
 - [docs/API_CONTRACT_POLICY.md](docs/API_CONTRACT_POLICY.md): Contract versioning and deprecation policy
 - [docs/TELEMETRY_INTEROPERABILITY.md](docs/TELEMETRY_INTEROPERABILITY.md): Hook/event mapping to observability backends
 - [docs/PRODUCTION_PROFILE_AND_RUNBOOK.md](docs/PRODUCTION_PROFILE_AND_RUNBOOK.md): Recommended operational defaults and incident playbooks
 - [docs/ARCHITECTURE_DATA_FLOW.md](docs/ARCHITECTURE_DATA_FLOW.md): Request lifecycle diagram and reliability/safety data-flow narrative
 - [docs/PROVIDER_COMPATIBILITY_MATRIX.md](docs/PROVIDER_COMPATIBILITY_MATRIX.md): Provider capability matrix with caveats for chat/streaming/tool-calls/embeddings
-- [docs/SDK_ENTERPRISE_READINESS_V4_CHECKLIST.md](docs/SDK_ENTERPRISE_READINESS_V4_CHECKLIST.md): Next-session enterprise hardening backlog
-- [docs/SDK_ENTERPRISE_READINESS_V3_CHECKLIST.md](docs/SDK_ENTERPRISE_READINESS_V3_CHECKLIST.md): Completed v3 hardening log
 - [CHANGELOG.md](CHANGELOG.md): Versioned release history and notable changes
 - [LICENSE](LICENSE): Project license text (MIT)
 - [kujo.toml](kujo.toml): Package metadata
-- [docs/SDK_ENTERPRISE_READINESS_V2_CHECKLIST.md](docs/SDK_ENTERPRISE_READINESS_V2_CHECKLIST.md): Completed enterprise hardening log
 
 ## Agent and Contributor Search Hygiene
 
@@ -599,11 +595,11 @@ Release workflow policy:
 Release quality-gate script:
 
 ```bash
-bash scripts/release_quality_gates.sh
+KUJO_BIN="$(command -v kujo)" bash scripts/release_quality_gates.sh
 ```
 
 The script enforces minimum test-floor thresholds across contract/security/reliability/parser/feature/live suites and runs a final feature smoke command.
-The aggregate release-gate floor is currently 95 tests.
+Per-suite and aggregate test floors are defined in `scripts/release_quality_gates.sh`; additions must raise the relevant floor so missing regressions fail CI.
 The script also runs the benchmark quality gate (`scripts/benchmark_quality_gate.kujo`).
 Benchmark guardrails cover chat and embeddings normalization paths plus retry-delay micro-bench cases with explicit latency and throughput thresholds.
 The gate fails if runtime smoke or benchmark commands emit type-checking warnings.
@@ -630,7 +626,7 @@ Release validation publishes SBOM and integrity manifest artifacts and attaches 
 
 ## Release and Versioning Process
 
-For each release candidate, follow [docs/RELEASE_CANDIDATE_CHECKLIST.md](docs/RELEASE_CANDIDATE_CHECKLIST.md) for the exact local command sequence. In summary:
+For each release candidate, run the commands under [Repository verification](#repository-verification), then:
 
 1. Update package version fields in `kennel.toml` and `kujo.toml`.
 2. Add release notes under the matching version heading in `CHANGELOG.md`.
@@ -667,3 +663,7 @@ Run `KUJO_BIN="$(command -v kujo)" bash scripts/release_quality_gates.sh` for al
 The `./kujo` compatibility wrapper stages execution into a temporary repository copy and removes it on normal success/failure. Generated files in that copy are temporary; use the installed `kujo` command to keep generated outputs in this checkout.
 
 Shared `state_backend` hooks currently fall back to client-local state when reads fail and ignore write-hook exceptions. Their read/modify/write sequence is not atomic across processes. Treat these controls as best-effort accounting, not a strict distributed spending limit; use external serialized admission when strict enforcement is required.
+
+Completed provider usage is charged through the configured state backend before rolling-budget rejection or structured-output validation. Structured-output retries recheck rolling budgets before sending another request. Native embedding encoders receive the original `input` value. Streaming usage metadata is retained across frames that omit usage or report `null`.
+
+On Kujo 1.5.0, client dictionaries and the in-memory `state`/`registry_id` backends did not retain writes across calls in local probes. Use explicit persistent `get`/`set` backend hooks for cross-call accounting; those hooks are still best-effort and non-atomic. Do not treat client-local admission or counters as a process-wide enforcement boundary.

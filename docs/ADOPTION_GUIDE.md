@@ -99,5 +99,5 @@ own test suites use both patterns, so CI runs with no secrets configured.
   a custom provider in one page.
 - [PRODUCTION_PROFILE_AND_RUNBOOK.md](PRODUCTION_PROFILE_AND_RUNBOOK.md) —
   recommended defaults and incident playbooks.
-- [RELEASE_CANDIDATE_CHECKLIST.md](RELEASE_CANDIDATE_CHECKLIST.md) — the exact
+- [RELEASE_CANDIDATE_CHECKLIST.md](../README.md#repository-verification) — the exact
   local command sequence to validate a release.
