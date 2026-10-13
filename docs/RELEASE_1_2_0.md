@@ -36,3 +36,15 @@ See [the hardening audit](audits/repository-hardening.md) for exact commands, co
 ## One-release live-provider waiver
 
 On October 13, 2026, the maintainer explicitly authorized publishing 1.2.0 without live-provider smoke evidence. This waiver applies only to tag `v1.2.0`. No live-provider success is claimed. Contract, compatibility, benchmark, schema, documentation, and supply-chain checks remain required. Other future release tags still require configured-provider evidence unless separately authorized.
+
+## Publication record
+
+Tag `v1.2.0` points to `de027d681d744aabcc21e025e111693500a99b1d`, 16 commits after `v1.1.1`. The [GitHub release](https://github.com/kujolang/ai-sdk/releases/tag/v1.2.0) was published on October 13, 2026, with SPDX SBOM and integrity-manifest assets.
+
+The final [release workflow](https://github.com/kujolang/ai-sdk/actions/runs/38400381006), [CI](https://github.com/kujolang/ai-sdk/actions/runs/38400070672), and [compatibility matrix](https://github.com/kujolang/ai-sdk/actions/runs/38400070798) passed. The live-provider waiver above remains explicit; these results do not imply a paid-provider run.
+
+The [Kennel publisher](https://github.com/kujolang/kennel-registry/actions/runs/38400384070) passed, including deployed package discovery. Public 1.2.0 metadata identifies the release commit, and the downloaded package archive has SHA-256 `1622b676ef34350d541d5754a7f23922657e6f1aa8b876a84d26805bf44ecceb`. Its packaged manifest reports 1.2.0. A separate clean-project install attempt on the maintainer machine stopped at an HTTP connection error before dependency resolution; no local clean-install success is claimed.
+
+The [docs build](https://github.com/kujolang/docs.kujolang.ai/actions/runs/38400639636) passed at `4889eaba6f4155bd3788f573ae7aad0bfbd9c65a`. The published `gh-pages` tree `6fe6cff9013157b27941401ec42fce70cc0db575` exactly matches that artifact, and the public SDK guide and release inventory show 1.2.0.
+
+The MCP catalog update passed [CI](https://github.com/kujolang/kujolang-mcp/actions/runs/38400681354) at `466ce3f5660521e83af9a564255e504cfde2a36a`. Worker deployment `7dade0bc-4482-42c3-a24e-7851e9769ad8` passed live parity checks for all 234 catalog items and six installer profiles, plus a direct AI SDK lookup at `https://mcp.kujolang.ai/mcp`.
