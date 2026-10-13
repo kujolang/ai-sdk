@@ -1,0 +1,138 @@
+test_setup {
+ from src.providers import openai_provider
+ from src.ai_sdk import create_client, chat_completion, embeddings, client_state, reset_client_state, reset_memory_state_backend
+}
+
+test "client-local token accounting persists without sharing independent clients" {
+ client := create_client(openai_provider(), "fixture-key")
+ options := {"offline_fixture": true, "rolling_token_budget_tokens": 20}
+ assert_true(chat_completion(client, [], options)["ok"])
+ blocked := chat_completion(client, [], options)
+ assert_equal(blocked["error"]["code"], "governance_budget_exceeded")
+ assert_equal(blocked["raw"]["used_tokens"], 20)
+ assert_true(chat_completion(create_client(openai_provider(), "fixture-key"), [], options)["ok"])
+}
+
+test "state dictionaries seed counters once and retain subsequent writes" {
+ client := create_client(openai_provider(), "fixture-key")
+ options := {"offline_fixture": true, "rolling_token_budget_tokens": 25,
+  "state_backend": {"state": {"ai_sdk:seeded:governance_tokens_used": 5}}, "state_namespace": "seeded"}
+ assert_true(chat_completion(client, [], options)["ok"])
+ blocked := chat_completion(client, [], options)
+ assert_equal(blocked["error"]["code"], "governance_budget_exceeded")
+ assert_equal(blocked["raw"]["used_tokens"], 25)
+}
+
+test "registry state shares across clients and isolates registry identities and namespaces" {
+ registry := uuid_v4()
+ options := {"offline_fixture": true, "rolling_token_budget_tokens": 20,
+  "state_backend": {"registry_id": registry}, "state_namespace": "one"}
+ assert_true(chat_completion(create_client(openai_provider(), "fixture-key"), [], options)["ok"])
+ blocked := chat_completion(create_client(openai_provider(), "fixture-key"), [], options)
+ assert_equal(blocked["error"]["code"], "governance_budget_exceeded")
+ options["state_namespace"] = "two"
+ assert_true(chat_completion(create_client(openai_provider(), "fixture-key"), [], options)["ok"])
+ options["state_namespace"] = "one"
+ options["state_backend"] = {"registry_id": uuid_v4()}
+ assert_true(chat_completion(create_client(openai_provider(), "fixture-key"), [], options)["ok"])
+}
+
+test "embedding cost usage persists in all memory backend modes" {
+ for backend in [null, {"state": {}}, {"registry_id": uuid_v4()}] {
+  client := create_client(openai_provider(), "fixture-key")
+  options := {"offline_fixture": true, "rolling_cost_budget_cents": 4.0,
+   "estimated_cost_per_1k_tokens_cents": 1000.0, "state_backend": backend}
+  assert_true(embeddings(client, "x", options)["ok"])
+  blocked := embeddings(client, "x", options)
+  assert_equal(blocked["error"]["code"], "governance_budget_exceeded")
+  assert_equal(blocked["raw"]["used_cost_cents"], 4.0)
+ }
+}
+
+test "client breaker remains open on the next call" {
+ client := create_client(openai_provider(), "fixture-key")
+ options := {"transport": func(u, o) { return Err("timeout") }, "max_retries": 0,
+  "circuit_breaker_enabled": true, "circuit_breaker_error_threshold": 1, "circuit_breaker_cooldown_ms": 60000}
+ first := chat_completion(client, [], options)
+ assert_equal(first["error"]["code"], "circuit_breaker_open")
+ second := chat_completion(client, [], options)
+ assert_equal(second["error"]["code"], "circuit_breaker_open")
+ assert_equal(second["raw"]["cause"], null)
+}
+
+test "explicit client counter seeds remain honored" {
+ client := create_client(openai_provider(), "fixture-key")
+ options := {"offline_fixture": true, "rolling_token_budget_tokens": 100}
+ assert_true(chat_completion(client, [], options)["ok"])
+ client["governance_tokens_used"] = 100
+ blocked := chat_completion(client, [], options)
+ assert_equal(blocked["raw"]["used_tokens"], 100)
+}
+
+test "reentrant chat sees occupied admission slot and finalization releases it" {
+ client := create_client(openai_provider(), "fixture-key")
+ options := {"max_retries": 0, "max_in_flight_requests": 1,
+  "transport": func(u, o) {
+   nested := chat_completion(client, [], {"max_retries": 0, "max_in_flight_requests": 1,
+    "transport": func(nu, no) { return Err("unexpected nested transport") }})
+   assert_equal(nested["error"]["code"], "concurrency_limit_exceeded")
+   return Ok({"_status": 200, "_body": "{\"choices\":[{\"message\":{\"content\":\"ok\"}}]}"})
+  }}
+ assert_true(chat_completion(client, [], options)["ok"])
+ assert_true(chat_completion(client, [], options)["ok"])
+}
+
+test "trace sequence increments across requests" {
+ client := create_client(openai_provider(), "fixture-key")
+ options := {"max_retries": 0, "transport": func(u, o) { return Err("network") }}
+ first := chat_completion(client, [], options)
+ second := embeddings(client, "x", options)
+ assert_true(ends_with(first["observability"]["trace_id"], "-1"))
+ assert_true(ends_with(second["observability"]["trace_id"], "-2"))
+}
+
+test "state snapshots and cleanup preserve seeds and release storage" {
+ client := create_client(openai_provider(), "fixture-key")
+ client["governance_tokens_used"] = 3
+ assert_true(chat_completion(client, [], {"offline_fixture": true, "rolling_token_budget_tokens": 100})["ok"])
+ assert_equal(client_state(client)["governance_tokens_used"], 23)
+ assert_equal(client_state(client)["in_flight_requests"], 0)
+ assert_equal(has_key(client_state(client), "api_key"), 0)
+ assert_true(reset_client_state(client))
+ assert_equal(client_state(client)["governance_tokens_used"], 3)
+ assert_equal(reset_client_state(client), false)
+}
+
+test "active clients cannot reset their admission state" {
+ client := create_client(openai_provider(), "fixture-key")
+ result := chat_completion(client, [], {"max_retries": 0, "transport": func(u, o) {
+  assert_equal(client_state(client)["in_flight_requests"], 1)
+  assert_equal(reset_client_state(client), false)
+  return Err("failure")
+ }})
+ assert_equal(result["ok"], false)
+ assert_equal(client_state(client)["in_flight_requests"], 0)
+ assert_true(reset_client_state(client))
+}
+
+test "registry cleanup is explicit and independent from client cleanup" {
+ backend := {"registry_id": uuid_v4()}
+ options := {"offline_fixture": true, "state_backend": backend, "rolling_token_budget_tokens": 20}
+ client := create_client(openai_provider(), "fixture-key")
+ assert_true(chat_completion(client, [], options)["ok"])
+ assert_true(reset_client_state(client))
+ assert_equal(chat_completion(client, [], options)["ok"], false)
+ assert_true(reset_memory_state_backend(backend))
+ assert_true(chat_completion(client, [], options)["ok"])
+ assert_equal(reset_memory_state_backend({}), false)
+}
+
+test "dictionary backend state remains isolated across independent clients" {
+ options := {"offline_fixture": true, "state_backend": {"state": {}}, "rolling_token_budget_tokens": 20}
+ first := create_client(openai_provider(), "fixture-key")
+ second := create_client(openai_provider(), "fixture-key")
+ assert_true(chat_completion(first, [], options)["ok"])
+ assert_true(chat_completion(second, [], options)["ok"])
+ assert_equal(chat_completion(first, [], options)["ok"], false)
+ assert_equal(chat_completion(second, [], options)["ok"], false)
+}

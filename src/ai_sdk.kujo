@@ -6,7 +6,7 @@
 from provider_driver import resolve_provider_driver
 from openai_compatible_driver import openai_encode_chat, openai_encode_embeddings
 
-STATE_BACKEND_REGISTRY := {}
+from memory_state import memory_scope_key, memory_read, memory_write, memory_reset
 
 func dict_get_or(obj, key, default_value) {
 	if type(obj) != "dict" {
@@ -218,10 +218,46 @@ func create_client_impl(provider, api_key_override) {
 		"driver_source": driver_resolution["source"],
 		"driver_description": dict_get_or(driver_resolution, "description", {}),
 		"transport": dict_get_or(provider, "transport", null),
+		"_state_id": uuid_v4(),
 		"in_flight_requests": 0,
 		"circuit_breaker_consecutive_failures": 0,
 		"circuit_breaker_open_until_ms": 0
 	}
+}
+
+func client_memory_scope(client) {
+	identity := dict_get_or(client, "_state_id", "")
+	if type(identity) != "string" || identity == "" { return "" }
+	return memory_scope_key("client", identity)
+}
+
+func client_state_get(client, field, fallback) {
+	seed := dict_get_or(client, field, fallback)
+	return memory_read(client_memory_scope(client), field, seed, seed)
+}
+
+func client_state_set(client, field, value, fallback) {
+	memory_write(client_memory_scope(client), field, dict_get_or(client, field, fallback), value)
+}
+
+func client_state_impl(client) {
+	snapshot := {}
+	for field in ["in_flight_requests", "circuit_breaker_consecutive_failures", "circuit_breaker_open_until_ms", "governance_tokens_used", "trace_sequence"] {
+		snapshot[field] = client_state_get(client, field, 0)
+	}
+	snapshot["governance_cost_cents_used"] = client_state_get(client, "governance_cost_cents_used", 0.0)
+	return snapshot
+}
+
+func reset_client_state_impl(client) {
+	if client_state_get(client, "in_flight_requests", 0) > 0 { return false }
+	return memory_reset(client_memory_scope(client))
+}
+
+func reset_memory_state_backend_impl(backend) {
+	registry_id := dict_get_or(backend, "registry_id", "")
+	if registry_id == "" { return false }
+	return memory_reset(memory_scope_key("registry", registry_id))
 }
 
 func create_message_impl(role, content) {
@@ -1131,9 +1167,9 @@ func planned_request_total_tokens(messages, payload, resolved_options) {
 }
 
 func load_governance_token_usage(client, resolved_options) {
-	local_value := dict_get_or(client, "governance_tokens_used", 0)
+	local_value := client_state_get(client, "governance_tokens_used", 0)
 	key := state_backend_key(client, resolved_options, "governance_tokens_used")
-	value := state_backend_get(resolved_options, key, local_value)
+	value := state_backend_get(client, resolved_options, key, local_value)
 	if type(value) != "int" {
 		return local_value
 	}
@@ -1141,15 +1177,15 @@ func load_governance_token_usage(client, resolved_options) {
 }
 
 func persist_governance_token_usage(client, resolved_options, value) {
-	client["governance_tokens_used"] := value
+	client_state_set(client, "governance_tokens_used", value, 0)
 	key := state_backend_key(client, resolved_options, "governance_tokens_used")
-	state_backend_set(resolved_options, key, value)
+	state_backend_set(client, resolved_options, key, value)
 }
 
 func load_governance_cost_usage(client, resolved_options) {
-	local_value := dict_get_or(client, "governance_cost_cents_used", 0.0)
+	local_value := client_state_get(client, "governance_cost_cents_used", 0.0)
 	key := state_backend_key(client, resolved_options, "governance_cost_cents_used")
-	value := state_backend_get(resolved_options, key, local_value)
+	value := state_backend_get(client, resolved_options, key, local_value)
 	if type(value) == "int" {
 		return value * 1.0
 	}
@@ -1160,9 +1196,9 @@ func load_governance_cost_usage(client, resolved_options) {
 }
 
 func persist_governance_cost_usage(client, resolved_options, value) {
-	client["governance_cost_cents_used"] := value
+	client_state_set(client, "governance_cost_cents_used", value, 0.0)
 	key := state_backend_key(client, resolved_options, "governance_cost_cents_used")
-	state_backend_set(resolved_options, key, value)
+	state_backend_set(client, resolved_options, key, value)
 }
 
 func enforce_governance_preflight(client, messages, payload, resolved_options) {
@@ -2011,8 +2047,8 @@ func embeddings_impl(client, input_value, options) {
 	deadline_ms := resolve_request_deadline_ms(resolved_options, request_started_at_ms)
 	trace_id := dict_get_or(resolved_options, "trace_id", "")
 	if trace_id == "" {
-		trace_sequence := dict_get_or(client, "trace_sequence", 0) + 1
-		client["trace_sequence"] := trace_sequence
+		trace_sequence := client_state_get(client, "trace_sequence", 0) + 1
+		client_state_set(client, "trace_sequence", trace_sequence, 0)
 		trace_id := client["provider"]["name"] + "-trace-" + to_string(current_timestamp()) + "-" + to_string(trace_sequence)
 	}
 	start_count := 0
@@ -2637,7 +2673,7 @@ func state_backend_key(client, resolved_options, suffix) {
 	return "ai_sdk:" + namespace + ":" + suffix
 }
 
-func state_backend_get(resolved_options, key, fallback_value) {
+func state_backend_get(client, resolved_options, key, fallback_value) {
 	backend := dict_get_or(resolved_options, "state_backend", null)
 	if type(backend) != "dict" {
 		return fallback_value
@@ -2645,21 +2681,14 @@ func state_backend_get(resolved_options, key, fallback_value) {
 
 	registry_id := dict_get_or(backend, "registry_id", "")
 	if registry_id != "" {
-		if has_key(STATE_BACKEND_REGISTRY, registry_id) {
-			bucket := STATE_BACKEND_REGISTRY[registry_id]
-			if type(bucket) == "dict" && has_key(bucket, key) {
-				return bucket[key]
-			}
-		}
-		return fallback_value
+		return memory_read(memory_scope_key("registry", registry_id), key, null, fallback_value)
 	}
 
 	backend_state := dict_get_or(backend, "state", null)
 	if type(backend_state) == "dict" {
-		if has_key(backend_state, key) {
-			return backend_state[key]
-		}
-		return fallback_value
+		seed := dict_get_or(backend_state, key, null)
+		initial := dict_get_or(backend_state, key, fallback_value)
+		return memory_read(client_memory_scope(client), "backend:" + key, seed, initial)
 	}
 
 	get_fn := dict_get_or(backend, "get", null)
@@ -2682,7 +2711,7 @@ func state_backend_get(resolved_options, key, fallback_value) {
 	return result
 }
 
-func state_backend_set(resolved_options, key, value) {
+func state_backend_set(client, resolved_options, key, value) {
 	backend := dict_get_or(resolved_options, "state_backend", null)
 	if type(backend) != "dict" {
 		return
@@ -2690,19 +2719,13 @@ func state_backend_set(resolved_options, key, value) {
 
 	registry_id := dict_get_or(backend, "registry_id", "")
 	if registry_id != "" {
-		if has_key(STATE_BACKEND_REGISTRY, registry_id) == 0 {
-			STATE_BACKEND_REGISTRY[registry_id] := {}
-		}
-		bucket := STATE_BACKEND_REGISTRY[registry_id]
-		if type(bucket) == "dict" {
-			bucket[key] := value
-		}
+		memory_write(memory_scope_key("registry", registry_id), key, null, value)
 		return
 	}
 
 	backend_state := dict_get_or(backend, "state", null)
 	if type(backend_state) == "dict" {
-		backend_state[key] := value
+		memory_write(client_memory_scope(client), "backend:" + key, dict_get_or(backend_state, key, null), value)
 		return
 	}
 
@@ -2724,9 +2747,9 @@ func state_backend_set(resolved_options, key, value) {
 }
 
 func load_breaker_consecutive_failures(client, resolved_options) {
-	local_value := dict_get_or(client, "circuit_breaker_consecutive_failures", 0)
+	local_value := client_state_get(client, "circuit_breaker_consecutive_failures", 0)
 	key := state_backend_key(client, resolved_options, "breaker_consecutive_failures")
-	value := state_backend_get(resolved_options, key, local_value)
+	value := state_backend_get(client, resolved_options, key, local_value)
 	if type(value) != "int" {
 		return local_value
 	}
@@ -2734,9 +2757,9 @@ func load_breaker_consecutive_failures(client, resolved_options) {
 }
 
 func load_breaker_open_until_ms(client, resolved_options) {
-	local_value := dict_get_or(client, "circuit_breaker_open_until_ms", 0)
+	local_value := client_state_get(client, "circuit_breaker_open_until_ms", 0)
 	key := state_backend_key(client, resolved_options, "breaker_open_until_ms")
-	value := state_backend_get(resolved_options, key, local_value)
+	value := state_backend_get(client, resolved_options, key, local_value)
 	if type(value) != "int" {
 		return local_value
 	}
@@ -2788,16 +2811,16 @@ func track_circuit_breaker_result(resolved_options, result, consecutive_failures
 }
 
 func persist_circuit_breaker_state(client, consecutive_failures, open_until_ms) {
-	client["circuit_breaker_consecutive_failures"] := consecutive_failures
-	client["circuit_breaker_open_until_ms"] := open_until_ms
+	client_state_set(client, "circuit_breaker_consecutive_failures", consecutive_failures, 0)
+	client_state_set(client, "circuit_breaker_open_until_ms", open_until_ms, 0)
 }
 
 func persist_circuit_breaker_state_with_backend(client, resolved_options, consecutive_failures, open_until_ms) {
 	persist_circuit_breaker_state(client, consecutive_failures, open_until_ms)
 	consecutive_key := state_backend_key(client, resolved_options, "breaker_consecutive_failures")
 	open_until_key := state_backend_key(client, resolved_options, "breaker_open_until_ms")
-	state_backend_set(resolved_options, consecutive_key, consecutive_failures)
-	state_backend_set(resolved_options, open_until_key, open_until_ms)
+	state_backend_set(client, resolved_options, consecutive_key, consecutive_failures)
+	state_backend_set(client, resolved_options, open_until_key, open_until_ms)
 }
 
 func circuit_breaker_open_response(client, open_until_ms, now_ms, cause_result) {
@@ -2846,9 +2869,9 @@ func finalize_chat_completion_result(client, result, start_count, complete_count
 	}
 	result["observability"] := observability
 
-	current_in_flight := dict_get_or(client, "in_flight_requests", 0)
+	current_in_flight := client_state_get(client, "in_flight_requests", 0)
 	if current_in_flight > 0 {
-		client["in_flight_requests"] := current_in_flight - 1
+		client_state_set(client, "in_flight_requests", current_in_flight - 1, 0)
 	}
 
 	return result
@@ -3255,7 +3278,7 @@ func chat_completion_impl(client, messages, options) {
 	if max_in_flight_requests < 1 {
 		max_in_flight_requests := 1
 	}
-	current_in_flight := dict_get_or(client, "in_flight_requests", 0)
+	current_in_flight := client_state_get(client, "in_flight_requests", 0)
 	if current_in_flight >= max_in_flight_requests {
 		queue_wait_timeout_ms := dict_get_or(resolved_options, "queue_wait_timeout_ms", 0)
 		queue_poll_interval_ms := dict_get_or(resolved_options, "queue_poll_interval_ms", 25)
@@ -3284,7 +3307,7 @@ func chat_completion_impl(client, messages, options) {
 					)
 				}
 				sleep(queue_poll_interval_ms)
-				current_in_flight := dict_get_or(client, "in_flight_requests", 0)
+				current_in_flight := client_state_get(client, "in_flight_requests", 0)
 			}
 		} else {
 		return standard_error_response_impl(
@@ -3297,7 +3320,7 @@ func chat_completion_impl(client, messages, options) {
 		)
 		}
 	}
-	client["in_flight_requests"] := current_in_flight + 1
+	client_state_set(client, "in_flight_requests", current_in_flight + 1, 0)
 
 	max_retries := resolved_options["max_retries"]
 	if max_retries < 0 {
@@ -3326,8 +3349,8 @@ func chat_completion_impl(client, messages, options) {
 	deadline_ms := resolve_request_deadline_ms(resolved_options, request_started_at_ms)
 	trace_id := dict_get_or(resolved_options, "trace_id", "")
 	if trace_id == "" {
-		trace_sequence := dict_get_or(client, "trace_sequence", 0) + 1
-		client["trace_sequence"] := trace_sequence
+		trace_sequence := client_state_get(client, "trace_sequence", 0) + 1
+		client_state_set(client, "trace_sequence", trace_sequence, 0)
 		trace_id := client["provider"]["name"] + "-trace-" + to_string(request_started_at_ms) + "-" + to_string(trace_sequence)
 	}
 	start_count := 0
@@ -3611,3 +3634,7 @@ export sdk_default_limits := default_limits
 export chat_completion := chat_completion_impl
 export chat_completion_stream := chat_completion_stream_impl
 export embeddings := embeddings_impl
+
+export client_state := client_state_impl
+export reset_client_state := reset_client_state_impl
+export reset_memory_state_backend := reset_memory_state_backend_impl

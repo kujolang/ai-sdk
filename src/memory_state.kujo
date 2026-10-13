@@ -1,0 +1,33 @@
+# Process-local storage for value-copied SDK dictionaries. Never stores clients,
+# credentials or payloads. Callers own cleanup; no eviction may reset a budget.
+func scope_key(kind, identity) {
+	return "ai_sdk:memory:v1:" + to_json([kind, identity])
+}
+
+func read_value(scope, field, seed, fallback) {
+	if scope == "" { return fallback }
+	bucket := {}
+	if shared_has(scope) { bucket = shared_get(scope) } else { return fallback }
+	if type(bucket) != "dict" || has_key(bucket, field) == 0 { return fallback }
+	entry := bucket[field]
+	# Explicitly changed caller seeds override retained values. An unchanged seed
+	# must not erase updates on the next call through a copied client/options map.
+	if entry["seed"] != seed { return fallback }
+	return entry["value"]
+}
+
+func write_value(scope, field, seed, value) {
+	if scope == "" { return }
+	bucket := {}
+	if shared_has(scope) { bucket = shared_get(scope) }
+	bucket[field] = {"seed": seed, "value": value}
+	shared_set(scope, bucket)
+}
+
+export memory_scope_key := scope_key
+export memory_read := read_value
+export memory_write := write_value
+export memory_reset := func(scope) {
+	if scope == "" { return false }
+	return shared_delete(scope)
+}
