@@ -1,0 +1,56 @@
+# Create once, then pass copies of this handle to every participating client.
+# Atomic increment elects one owner; failed contenders undo only their increment.
+export create_atomic_memory_backend := func() {
+ identity := "ai_sdk:atomic:v1:" + uuid_v4()
+ lock_key := identity + ":lock"
+ owner_key := identity + ":owner"
+ data_key := identity + ":data"
+ poison_key := identity + ":poison"
+ shared_set(lock_key, 0)
+ shared_set(owner_key, "")
+ shared_set(data_key, {})
+ shared_set(poison_key, false)
+ return {
+  "requires_strict": true,
+  "acquire": func(namespace, owner) {
+   if shared_add_int(lock_key, 1) != 1 {
+    shared_add_int(lock_key, -1)
+    return false
+   }
+   if shared_get(poison_key) {
+    shared_add_int(lock_key, -1)
+    return false
+   }
+   shared_set(owner_key, owner)
+   return true
+  },
+  "get": func(key, fallback) {
+   state := shared_get(data_key)
+   if has_key(state, key) { return state[key] }
+   return fallback
+  },
+  "set": func(key, value) {
+   state := shared_get(data_key)
+   state[key] = value
+   shared_set(data_key, state)
+   return true
+  },
+  "release": func(namespace, owner, healthy) {
+   if shared_get(owner_key) != owner { return false }
+   if !healthy { shared_set(poison_key, true) }
+   shared_set(owner_key, "")
+   shared_add_int(lock_key, -1)
+   return true
+  },
+  "reset": func() {
+   if shared_add_int(lock_key, 1) != 1 {
+    shared_add_int(lock_key, -1)
+    return false
+   }
+   shared_set(data_key, {})
+   shared_set(poison_key, false)
+   shared_add_int(lock_key, -1)
+   return true
+  }
+ }
+}

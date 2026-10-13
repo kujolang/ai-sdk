@@ -6,6 +6,7 @@
 from provider_driver import resolve_provider_driver
 from openai_compatible_driver import openai_encode_chat, openai_encode_embeddings
 
+from atomic_state import create_atomic_memory_backend
 from memory_state import memory_scope_key, memory_read, memory_write, memory_reset
 
 func dict_get_or(obj, key, default_value) {
@@ -294,6 +295,7 @@ func default_limits() {
 		"circuit_breaker_half_open_enabled": true,
 		"circuit_breaker_half_open_max_retries": 0,
 		"state_backend": null,
+		"governance_mode": "best_effort",
 		"state_namespace": "",
 		"max_prompt_characters": 20000,
 		"max_tools_per_request": 32,
@@ -347,6 +349,7 @@ func resolve_chat_options(client, options) {
 		"circuit_breaker_half_open_enabled": limits["circuit_breaker_half_open_enabled"],
 		"circuit_breaker_half_open_max_retries": limits["circuit_breaker_half_open_max_retries"],
 		"state_backend": null,
+		"governance_mode": "best_effort",
 		"state_namespace": "",
 		"max_prompt_characters": limits["max_prompt_characters"],
 		"max_tools_per_request": limits["max_tools_per_request"],
@@ -392,6 +395,7 @@ func resolve_chat_options(client, options) {
 	resolved["circuit_breaker_half_open_enabled"] := resolve_option_with_default(options, "circuit_breaker_half_open_enabled", resolved["circuit_breaker_half_open_enabled"])
 	resolved["circuit_breaker_half_open_max_retries"] := resolve_option_with_default(options, "circuit_breaker_half_open_max_retries", resolved["circuit_breaker_half_open_max_retries"])
 	resolved["state_backend"] := resolve_option_with_default(options, "state_backend", resolved["state_backend"])
+	resolved["governance_mode"] := resolve_option_with_default(options, "governance_mode", resolved["governance_mode"])
 	resolved["state_namespace"] := resolve_option_with_default(options, "state_namespace", resolved["state_namespace"])
 	resolved["max_prompt_characters"] := resolve_option_with_default(options, "max_prompt_characters", resolved["max_prompt_characters"])
 	resolved["max_tools_per_request"] := resolve_option_with_default(options, "max_tools_per_request", resolved["max_tools_per_request"])
@@ -2699,12 +2703,19 @@ func state_backend_get(client, resolved_options, key, fallback_value) {
 	result := fallback_value
 	get_error := null
 	try {
+		if dict_get_or(resolved_options, "governance_mode", "best_effort") == "strict" { fallback_value = 0 }
 		result := get_fn(key, fallback_value)
+		if dict_get_or(resolved_options, "governance_mode", "best_effort") == "strict" {
+			if type(result) != "int" && type(result) != "float" { throw "invalid backend counter" }
+			if result < 0 || result - result != 0 { throw "invalid backend counter" }
+			if ends_with(key, "governance_tokens_used") && type(result) != "int" { throw "invalid token counter" }
+		}
 	} except err {
 		get_error := err
 	}
 
 	if type(get_error) != "null" {
+		if dict_get_or(resolved_options, "governance_mode", "best_effort") == "strict" { throw "state backend read failed" }
 		return fallback_value
 	}
 
@@ -2736,12 +2747,14 @@ func state_backend_set(client, resolved_options, key, value) {
 
 	set_error := null
 	try {
-		set_fn(key, value)
+		write_result := set_fn(key, value)
+		if dict_get_or(resolved_options, "governance_mode", "best_effort") == "strict" && write_result != true { throw "state backend write rejected" }
 	} except err {
 		set_error := err
 	}
 
 	if type(set_error) != "null" {
+		if dict_get_or(resolved_options, "governance_mode", "best_effort") == "strict" { throw "state backend write failed" }
 		return
 	}
 }
@@ -3439,6 +3452,64 @@ func chat_completion_impl(client, messages, options) {
 	return finalize_chat_completion_result(client, fallback_result, start_count, complete_count, retry_count)
 }
 
+# Strict backends own a fenced lock spanning preflight, transport/retries and
+# accounting. Holding it across the whole operation closes the admission race.
+func strict_request(client, input_value, options, embedding) {
+ resolved := resolve_chat_options(client, options)
+ mode := dict_get_or(resolved, "governance_mode", "best_effort")
+ if mode == "best_effort" {
+  if dict_get_or(dict_get_or(resolved, "state_backend", {}), "requires_strict", false) {
+   return standard_error_response_impl(client, "state_backend_error", "This backend requires strict governance mode.", 0, null, false)
+  }
+  if embedding { return embeddings_impl(client, input_value, options) }
+  return chat_completion_impl(client, input_value, options)
+ }
+ if mode != "strict" {
+  return standard_error_response_impl(client, "state_backend_error", "Unknown governance mode.", 0, null, false)
+ }
+ backend := dict_get_or(resolved, "state_backend", null)
+ if type(backend) != "dict" {
+  return standard_error_response_impl(client, "state_backend_error", "Strict governance requires an atomic backend.", 0, null, false)
+ }
+ for name in ["acquire", "release", "get", "set"] {
+  if type(dict_get_or(backend, name, null)) != "function" {
+   return standard_error_response_impl(client, "state_backend_error", "Strict backend hooks are incomplete.", 0, null, false)
+  }
+ }
+ if dict_get_or(backend, "registry_id", "") != "" || type(dict_get_or(backend, "state", null)) == "dict" || len(dict_get_or(resolved, "fallback_providers", [])) > 0 {
+  return standard_error_response_impl(client, "state_backend_error", "Strict governance cannot mix legacy memory backends or provider fallback.", 0, null, false)
+ }
+ namespace := state_backend_key(client, resolved, "governance")
+ owner := uuid_v4()
+ acquired := false
+ acquire_failed := false
+ try { acquired = backend["acquire"](namespace, owner) } except err { acquire_failed = true }
+ if acquire_failed || acquired != true {
+  return standard_error_response_impl(client, "state_backend_error", "Atomic governance backend unavailable or busy.", 0, null, false)
+ }
+ healthy := true
+ initial_in_flight := client_state_get(client, "in_flight_requests", 0)
+ result := null
+ try {
+  if embedding { result = embeddings_impl(client, input_value, options) } else { result = chat_completion_impl(client, input_value, options) }
+ } except err {
+  healthy = false
+  if !embedding {
+   current := client_state_get(client, "in_flight_requests", 0)
+   if current > initial_in_flight { client_state_set(client, "in_flight_requests", current - 1, 0) }
+  }
+ }
+ released := false
+ try { released = backend["release"](namespace, owner, healthy) } except err { released = false }
+ if !healthy || released != true {
+  return standard_error_response_impl(client, "state_backend_error", "Atomic governance operation failed; reconcile backend state before retrying.", 0, null, false)
+ }
+ return result
+}
+
+func guarded_chat(client, messages, options) { return strict_request(client, messages, options, false) }
+func guarded_embeddings(client, input_value, options) { return strict_request(client, input_value, options, true) }
+
 func chat_completion_stream_impl(client, messages, options, on_event) {
 	build_callback_event_snapshot := func(event) {
 		if type(event) != "dict" {
@@ -3506,7 +3577,7 @@ func chat_completion_stream_impl(client, messages, options, on_event) {
 	}
 	stream_options["stream"] := true
 
-	result := chat_completion_impl(client, messages, stream_options)
+	result := guarded_chat(client, messages, stream_options)
 	emitted_events := []
 
 	if result["ok"] {
@@ -3631,10 +3702,12 @@ export normalize_stream_success := normalize_stream_success_response
 export normalize_usage_contract := normalize_usage_fields
 export resolve_options := resolve_chat_options
 export sdk_default_limits := default_limits
-export chat_completion := chat_completion_impl
+export chat_completion := guarded_chat
 export chat_completion_stream := chat_completion_stream_impl
-export embeddings := embeddings_impl
+export embeddings := guarded_embeddings
 
 export client_state := client_state_impl
 export reset_client_state := reset_client_state_impl
 export reset_memory_state_backend := reset_memory_state_backend_impl
+
+export atomic_memory_backend := create_atomic_memory_backend

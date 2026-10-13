@@ -1,0 +1,173 @@
+test_setup {
+ from src.providers import openai_provider
+ from src.ai_sdk import create_client, chat_completion, embeddings, chat_completion_stream, atomic_memory_backend, client_state
+}
+
+test "strict atomic memory backend shares authoritative token and cost totals" {
+ backend := atomic_memory_backend()
+ options := {"governance_mode": "strict", "state_backend": backend, "offline_fixture": true,
+  "rolling_token_budget_tokens": 24, "rolling_cost_budget_cents": 24.0, "estimated_cost_per_1k_tokens_cents": 1000.0}
+ seeded := create_client(openai_provider(), "key")
+ seeded["governance_tokens_used"] = 99999
+ assert_true(chat_completion(seeded, [], options)["ok"])
+ assert_true(embeddings(create_client(openai_provider(), "key"), "x", options)["ok"])
+ blocked := chat_completion(create_client(openai_provider(), "key"), [], options)
+ assert_equal(blocked["error"]["code"], "governance_budget_exceeded")
+ assert_equal(backend["get"]("ai_sdk:openai:governance_tokens_used", 0), 24)
+ assert_equal(backend["get"]("ai_sdk:openai:governance_cost_cents_used", 0), 24.0)
+ assert_true(backend["reset"]())
+ assert_true(chat_completion(seeded, [], options)["ok"])
+}
+
+test "strict mode rejects missing hooks ambiguous memory and provider fallback" {
+ for backend in [null, {}, {"state": {}}, {"registry_id": "legacy"}] {
+  result := chat_completion(create_client(openai_provider(), "key"), [], {"governance_mode": "strict", "state_backend": backend, "offline_fixture": true})
+  assert_equal(result["error"]["code"], "state_backend_error")
+ }
+ options := {"governance_mode": "strict", "state_backend": atomic_memory_backend(), "offline_fixture": true, "fallback_providers": [openai_provider()]}
+ assert_equal(embeddings(create_client(openai_provider(), "key"), "x", options)["error"]["code"], "state_backend_error")
+}
+
+test "reentrant competing request cannot cross preflight while owner is outstanding" {
+ backend := atomic_memory_backend()
+ nested_options := {"governance_mode": "strict", "state_backend": backend, "offline_fixture": true, "rolling_token_budget_tokens": 20}
+ options := {"governance_mode": "strict", "state_backend": backend, "rolling_token_budget_tokens": 20, "max_retries": 0,
+  "transport": func(u, o) {
+   nested := chat_completion(create_client(openai_provider(), "key"), [], nested_options)
+   assert_equal(nested["error"]["code"], "state_backend_error")
+   assert_equal(backend["reset"](), false)
+   return Ok({"_status": 200, "_body": "{\"choices\":[{\"message\":{\"content\":\"ok\"}}],\"usage\":{\"total_tokens\":20}}"})
+  }}
+ assert_true(chat_completion(create_client(openai_provider(), "key"), [], options)["ok"])
+ assert_equal(chat_completion(create_client(openai_provider(), "key"), [], nested_options)["error"]["code"], "governance_budget_exceeded")
+}
+
+test "read outages fail closed and poison memory backend until explicit reconciliation" {
+ backend := atomic_memory_backend()
+ broken := backend
+ broken["get"] = func(k, fallback) { throw "secret read failure" }
+ options := {"governance_mode": "strict", "state_backend": broken, "offline_fixture": true, "rolling_token_budget_tokens": 20}
+ result := chat_completion(create_client(openai_provider(), "key"), [], options)
+ assert_equal(result["error"]["code"], "state_backend_error")
+ assert_equal(contains(to_json(result), "secret"), 0)
+ options["state_backend"] = backend
+ assert_equal(chat_completion(create_client(openai_provider(), "key"), [], options)["error"]["code"], "state_backend_error")
+ assert_true(backend["reset"]())
+ assert_true(chat_completion(create_client(openai_provider(), "key"), [], options)["ok"])
+}
+
+test "partial accounting writes fail closed without releasing a usable backend" {
+ for failure in [false, null] {
+  backend := atomic_memory_backend()
+  broken := backend
+  original_set := backend["set"]
+  broken["set"] = func(k, value) {
+   if ends_with(k, "governance_cost_cents_used") { return failure }
+   return original_set(k, value)
+  }
+  options := {"governance_mode": "strict", "state_backend": broken, "offline_fixture": true, "rolling_token_budget_tokens": 100}
+  result := embeddings(create_client(openai_provider(), "key"), "x", options)
+  assert_equal(result["error"]["code"], "state_backend_error")
+  assert_equal(backend["get"]("ai_sdk:openai:governance_tokens_used", 0), 4)
+  assert_equal(backend["acquire"]("n", "new-owner"), false)
+ }
+}
+
+test "malformed counters and lock hook failures never become successful requests" {
+ for malformed in [null, "20", -1, 1.5] {
+  backend := atomic_memory_backend()
+  backend["get"] = func(k, fallback) { return malformed }
+  result := chat_completion(create_client(openai_provider(), "key"), [], {"governance_mode": "strict", "state_backend": backend, "offline_fixture": true, "rolling_token_budget_tokens": 20})
+  assert_equal(result["error"]["code"], "state_backend_error")
+ }
+ for name in ["acquire", "release"] {
+  backend := atomic_memory_backend()
+  if name == "acquire" { backend[name] = func(n, owner) { throw "secret lock failure" } }
+  else { backend[name] = func(n, owner, healthy) { throw "secret release failure" } }
+  result := chat_completion(create_client(openai_provider(), "key"), [], {"governance_mode": "strict", "state_backend": backend, "offline_fixture": true, "rolling_token_budget_tokens": 20})
+  assert_equal(result["error"]["code"], "state_backend_error")
+  assert_equal(contains(to_json(result), "secret"), 0)
+ }
+}
+
+test "legacy hooks retain best effort behavior without strict opt in" {
+ backend := {"get": func(k, fallback) { throw "read down" }, "set": func(k, v) { throw "write down" }}
+ result := chat_completion(create_client(openai_provider(), "key"), [], {"state_backend": backend, "offline_fixture": true, "rolling_token_budget_tokens": 20})
+ assert_true(result["ok"])
+}
+
+test "lock ownership and independent backend handles are isolated" {
+ one := atomic_memory_backend()
+ two := atomic_memory_backend()
+ assert_true(one["acquire"]("n", "owner"))
+ assert_equal(one["release"]("n", "imposter", true), false)
+ assert_equal(one["acquire"]("n", "contender"), false)
+ assert_true(two["acquire"]("n", "other"))
+ assert_true(two["release"]("n", "other", true))
+ assert_true(one["release"]("n", "owner", true))
+ assert_true(one["acquire"]("n", "next"))
+ assert_true(one["release"]("n", "next", true))
+}
+
+test "parallel spawned requests cannot lose usage or both spend last budget" {
+ backend := atomic_memory_backend()
+ marker := "atomic-test:" + uuid_v4()
+ shared_set(marker + ":started", false)
+ shared_set(marker + ":done", false)
+ shared_set(marker + ":release", false)
+ options := {"governance_mode": "strict", "state_backend": backend, "rolling_token_budget_tokens": 20, "max_retries": 0,
+  "transport": func(u, o) {
+   shared_set(marker + ":started", true)
+   wait_until := current_timestamp() + 10000
+   while !shared_get(marker + ":release") && current_timestamp() < wait_until { sleep(1) }
+   return Ok({"_status": 200, "_body": "{\"choices\":[{\"message\":{\"content\":\"ok\"}}],\"usage\":{\"total_tokens\":20}}"})
+  }}
+ shared_set(marker + ":options", options)
+ spawn {
+  from src.providers import openai_provider
+  from src.ai_sdk import create_client, chat_completion
+  spawned_options := shared_get(marker + ":options")
+  result := chat_completion(create_client(openai_provider(), "key"), [], spawned_options)
+  shared_set(marker + ":result", result)
+  shared_set(marker + ":done", true)
+ }
+ deadline := current_timestamp() + 5000
+ while !shared_get(marker + ":started") && current_timestamp() < deadline { sleep(1) }
+ assert_true(shared_get(marker + ":started"))
+ contender := embeddings(create_client(openai_provider(), "key"), "x", {"governance_mode": "strict", "state_backend": backend, "offline_fixture": true, "rolling_token_budget_tokens": 20})
+ shared_set(marker + ":release", true)
+ assert_equal(contender["error"]["code"], "state_backend_error")
+ while !shared_get(marker + ":done") && current_timestamp() < deadline { sleep(1) }
+ assert_true(shared_get(marker + ":done"))
+ assert_true(shared_get(marker + ":result")["ok"])
+ assert_equal(backend["get"]("ai_sdk:openai:governance_tokens_used", 0), 20)
+}
+
+test "accounting exceptions finalize admitted chat and quarantine the backend" {
+ backend := atomic_memory_backend()
+ backend["set"] = func(k, v) { throw "write unavailable" }
+ client := create_client(openai_provider(), "key")
+ options := {"governance_mode": "strict", "state_backend": backend, "rolling_token_budget_tokens": 20, "max_retries": 0,
+  "transport": func(u, o) { return Ok({"_status": 200, "_body": "{\"choices\":[{\"message\":{\"content\":\"ok\"}}],\"usage\":{\"total_tokens\":20}}"}) }}
+ assert_equal(chat_completion(client, [], options)["error"]["code"], "state_backend_error")
+ assert_equal(client_state(client)["in_flight_requests"], 0)
+ assert_equal(backend["acquire"]("n", "new-owner"), false)
+}
+
+test "transport failures release the lock and streamed calls use strict accounting" {
+ backend := atomic_memory_backend()
+ client := create_client(openai_provider(), "key")
+ options := {"governance_mode": "strict", "state_backend": backend, "rolling_token_budget_tokens": 20, "max_retries": 0,
+  "transport": func(u, o) { return Err("network down") }}
+ assert_equal(chat_completion(client, [], options)["ok"], false)
+ assert_true(backend["acquire"]("n", "after-error"))
+ assert_true(backend["release"]("n", "after-error", true))
+ options = {"governance_mode": "strict", "state_backend": backend, "rolling_token_budget_tokens": 20, "offline_fixture": true}
+ assert_true(chat_completion_stream(client, [], options, func(event) {})["ok"])
+ assert_equal(chat_completion(client, [], options)["error"]["code"], "governance_budget_exceeded")
+}
+
+test "atomic backend cannot accidentally bypass locking in legacy mode" {
+ result := chat_completion(create_client(openai_provider(), "key"), [], {"state_backend": atomic_memory_backend(), "offline_fixture": true})
+ assert_equal(result["error"]["code"], "state_backend_error")
+}
