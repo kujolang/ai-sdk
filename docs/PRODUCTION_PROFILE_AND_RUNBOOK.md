@@ -130,3 +130,11 @@ Escalate to incident response when any condition persists for 10+ minutes:
 - sustained 429 or 5xx above normal baseline
 - repeated `concurrency_limit_exceeded` despite queue controls
 - repeated `invalid_json` after provider rollback/retry policy adjustments
+
+## Native transport controls
+
+Set `max_raw_response_bytes` to a positive integer to enforce a native download cap before parsing (the runtime ceiling remains 8 MiB). Endpoint allowlist mode disables redirect following. Without an allowlist, `redirects` defaults to `follow`; use `none` to reject redirects explicitly. These controls work on published Kujo 1.5 and 1.6. Injected transports must enforce the forwarded limits themselves.
+
+Use `on_transport_chunk(event)` only with the native transport and a runtime containing `http_stream_collect` / `response_stream: "collect"`. The source backports add that API to 1.5 and 1.6; published immutable binaries have not changed. Unpatched binaries reject this option before I/O. The callback receives UTF-8-safe transport text fragments, which may split SSE records. Returning false or throwing cancels the request; transport and final structured-output failures are terminal to avoid replaying already-observed text. Existing normalized stream callbacks still run after the complete response. Account for partial delivery and unknown provider billing after cancellation; collection retains the bounded final body.
+
+Run `KUJO_BIN=/path/to/runtime python3 tests/runtime_transport_tests.py` for loopback redirect, byte-limit and compatibility checks. Set `KUJO_REQUIRE_STREAM_COLLECT=1` for a patched runtime so a missing consumer fails verification instead of skipping consumer-only tests. The Python harness owns an independent loopback fixture server; SDK behavior remains implemented and exercised in Kujo, including both VM and interpreter execution.

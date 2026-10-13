@@ -314,7 +314,7 @@ result := chat_completion_stream(client, messages, null, handler)
 
 `chat_completion_stream(...)` emits callback events and also returns the final normalized response with `emitted_events` attached for validation.
 
-Callbacks are emitted after the transport returns its buffered response; this API does not provide incremental network delivery. Set `max_raw_response_bytes` to bound retained parsing input (the transport must enforce its own download limit).
+The existing normalized stream callbacks are emitted after the complete response. For incremental network chunks, supply the additive `on_transport_chunk` option on a runtime with the stream-consumer API described below. `max_raw_response_bytes` now also bounds native downloads, before parsing. Custom transports remain responsible for enforcing the supplied download limit.
 
 If the callback throws, the stream call fails predictably with a normalized `stream_callback_error` response.
 
@@ -729,3 +729,27 @@ External persistent backends can implement the same contract:
 The backend must fence stale owners and maintain exclusion for the entire request, including retries. Do not use an expiring lease that can silently admit another owner while transport is still running. An acquire exception must leave no usable ambiguous ownership. A release failure must retain exclusion/quarantine. All processes using a shared budget must use the same lock and state contract. The SDK cannot make an arbitrary external hook implementation atomic; the built-in backend demonstrates the contract within one process, not distributed durability.
 
 Strict mode rejects mixed `state`/`registry_id` backends and nonempty `fallback_providers` before any provider call, preventing a fallback from silently changing the protected budget. Other existing request options and response contract 1.0.0 are preserved. There are no new environment variables. One completed request may still exceed the remaining budget and is charged before rejection, as before; serialization is not a provider-side hard spending cap. Unknown provider completion after a transport failure and recovery after process loss still require external reconciliation.
+
+### Native transport controls and incremental chunks
+
+The SDK passes `max_raw_response_bytes` to native HTTP as `max_response_bytes`. Positive limits are capped at the existing Kujo 1.5/1.6 ceiling of 8 MiB; zero retains the runtime default. Native size-limit failures return terminal `response_too_large`, including responses without Content-Length, rather than retrying an oversized download. Non-JSON HTTP error envelopes omit the native byte-buffer field so normalized errors remain JSON-serializable.
+
+`redirects` accepts `"follow"` (the compatible default) or `"none"`. When `endpoint_allowlist_enabled` is true, the SDK forces `"none"`; a redirect is returned as its HTTP error response rather than following an unchecked host. Configure the final provider endpoint directly. Injected transports keep their two-argument signature and receive these policy options; they must honor them to enforce equivalent controls.
+
+On a runtime containing `http_stream_collect` (including the explicit 1.5/1.6 backports), use:
+
+```kujo
+options := {
+    "stream": true,
+    "max_raw_response_bytes": 1048576,
+    "on_transport_chunk": func(event) {
+        print(event["text"])
+        return true
+    }
+}
+result := chat_completion(client, messages, options)
+```
+
+`on_transport_chunk` receives `{type: "chunk", text, observed_at_ms, status_code}` for successful HTTP response bytes as they arrive. Text preserves split UTF-8 code points. Chunk boundaries are transport boundaries, not SSE messages or semantic token boundaries: callers needing parsed deltas must frame SSE themselves. The final normalized result and existing `chat_completion_stream` callbacks remain unchanged and still run after completion. The collector retains the bounded full body for that final result. HTTP error bodies are not emitted to the chunk hook.
+
+Return `false` or throw to stop consumption. Cancellation/read failures are terminal and never automatically retried after partial delivery. Structured-output validation failures are also terminal with this hook, avoiding replay of already observed text. The hook requires the native transport; custom two-argument adapters are rejected when it is selected. On unpatched published Kujo 1.5/1.6, opting in returns `unsupported_feature` before network I/O; ordinary calls and the redirect/download fixes work on those published binaries. No runtime binary is silently replaced. Signed/query authentication remains outside this change; descriptors continue to reject query strings.

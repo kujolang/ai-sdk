@@ -309,6 +309,8 @@ func default_limits() {
 		"trace_id": "",
 		"endpoint_allowlist_enabled": false,
 		"endpoint_allowlist_hosts": [],
+		"redirects": "follow",
+		"on_transport_chunk": null,
 		"max_raw_response_bytes": 0
 	}
 }
@@ -369,6 +371,8 @@ func resolve_chat_options(client, options) {
 		"on_retry": null,
 		"endpoint_allowlist_enabled": limits["endpoint_allowlist_enabled"],
 		"endpoint_allowlist_hosts": limits["endpoint_allowlist_hosts"],
+		"redirects": limits["redirects"],
+		"on_transport_chunk": null,
 		"max_raw_response_bytes": limits["max_raw_response_bytes"]
 	}
 
@@ -415,9 +419,57 @@ func resolve_chat_options(client, options) {
 	resolved["on_retry"] := resolve_option_with_default(options, "on_retry", resolved["on_retry"])
 	resolved["endpoint_allowlist_enabled"] := resolve_option_with_default(options, "endpoint_allowlist_enabled", resolved["endpoint_allowlist_enabled"])
 	resolved["endpoint_allowlist_hosts"] := resolve_option_with_default(options, "endpoint_allowlist_hosts", resolved["endpoint_allowlist_hosts"])
+	resolved["redirects"] := resolve_option_with_default(options, "redirects", resolved["redirects"])
+	resolved["on_transport_chunk"] := resolve_option_with_default(options, "on_transport_chunk", null)
+	if type(resolved["on_transport_chunk"]) == "function" { resolved["structured_output_retryable"] = false }
 	resolved["max_raw_response_bytes"] := resolve_option_with_default(options, "max_raw_response_bytes", resolved["max_raw_response_bytes"])
 
 	return resolved
+}
+
+# Preserve the two-argument injected transport contract. Only the native adapter
+# consumes runtime streams; older binaries reject opt-in streaming before I/O.
+func runtime_transport(url, options) {
+ callback := dict_get_or(options, "_on_transport_chunk", null)
+ if type(callback) != "function" { return http_request(url, options) }
+ options["response_stream"] = "collect"
+ return http_request(url, options, func(event) {
+  if dict_get_or(event, "status", 0) < 200 || dict_get_or(event, "status", 0) > 299 { return true }
+  text := dict_get_or(event, "text", "")
+  if text == "" { return true }
+  return callback({"type": "chunk", "text": text, "observed_at_ms": event["observed_at_ms"], "status_code": event["status"]})
+ })
+}
+
+func transport_options(request_options, resolved_options) {
+ redirects := dict_get_or(resolved_options, "redirects", "follow")
+ if dict_get_or(resolved_options, "endpoint_allowlist_enabled", false) { redirects = "none" }
+ request_options["redirects"] = redirects
+ limit := dict_get_or(resolved_options, "max_raw_response_bytes", 0)
+ if type(limit) == "int" && limit > 0 {
+  # Published 1.5/1.6 HTTP bodies have an 8 MiB runtime ceiling.
+  if limit > 8388608 { limit = 8388608 }
+  request_options["max_response_bytes"] = limit
+ }
+ callback := dict_get_or(resolved_options, "on_transport_chunk", null)
+ if type(callback) == "function" { request_options["_on_transport_chunk"] = callback }
+ return request_options
+}
+
+func transport_error_result(client, error, resolved_options, request_context) {
+ if dict_get_or(request_context, "native_transport", false) {
+  message := to_string(error)
+  if contains(message, "exceeds maximum network body size") || contains(message, "max_response_bytes") {
+   return standard_error_response_impl(client, "response_too_large", "Provider response exceeded the transport download limit.", 0, null, false)
+  }
+  if contains(message, "HTTP response_stream must be a boolean") {
+   return standard_error_response_impl(client, "unsupported_feature", "Incremental transport requires the http_stream_collect runtime backport or a runtime including that API.", 0, null, false)
+  }
+  if type(dict_get_or(resolved_options, "on_transport_chunk", null)) == "function" {
+   return standard_error_response_impl(client, "transport_error", "Incremental transport failed or was cancelled; the request will not be replayed.", 0, null, false)
+  }
+ }
+ return standard_error_response_impl(client, "network_error", error, 0, null, true)
 }
 
 func resolve_transport_with_resolved(client, resolved_options) {
@@ -431,7 +483,7 @@ func resolve_transport_with_resolved(client, resolved_options) {
 		return client_transport
 	}
 
-	return http_request
+	return runtime_transport
 }
 
 func resolve_transport(client, options) {
@@ -783,6 +835,11 @@ func normalize_http_failure_response(client, status_code, response, body_text) {
 		}
 	}
 
+	if type(response) == "dict" {
+		json_response := {}
+		for key in keys(response) { if type(response[key]) != "bytes" { json_response[key] = response[key] } }
+		response = json_response
+	}
 	return standard_error_response_impl(
 		client,
 		"http_error",
@@ -1694,6 +1751,12 @@ func validate_driver_descriptor(client, descriptor, operation) {
 }
 
 func build_driver_request_context(client, payload, options, resolved_options, operation, messages, input_value) {
+ redirects := dict_get_or(resolved_options, "redirects", "follow")
+ if redirects != "follow" && redirects != "none" { return {"error": standard_error_response_impl(client, "config_error", "redirects must be follow or none.", 0, null, false)} }
+ native := type(dict_get_or(resolved_options, "transport", null)) != "function" && type(dict_get_or(client, "transport", null)) != "function"
+ callback := dict_get_or(resolved_options, "on_transport_chunk", null)
+ if callback != null && (type(callback) != "function" || !native) { return {"error": standard_error_response_impl(client, "config_error", "on_transport_chunk requires a function and the native transport.", 0, null, false)} }
+
 	hook := "encode_chat"
 	if operation == "embeddings" { hook = "encode_embeddings" }
 	encoded := driver_hook(client, hook, {"operation": operation, "provider": client["provider"], "credential": client["api_key"], "payload": payload, "messages": messages, "input": input_value, "options": options, "resolved_options": resolved_options})
@@ -1723,6 +1786,7 @@ func build_driver_request_context(client, payload, options, resolved_options, op
 		"read_timeout": resolved_options["read_timeout"],
 		"body": descriptor["body"],
 		"stream_mode": descriptor["stream_mode"],
+		"native_transport": native,
 		"transport": resolve_transport_with_resolved(client, resolved_options)
 	}
 }
@@ -1804,6 +1868,7 @@ func execute_embeddings_request_once(client, payload, resolved_options, attempt,
 	}
 	request_options["_headers"] := request_context["headers"]
 	request_options["_body"] := request_context["body"]
+	request_options = transport_options(request_options, resolved_options)
 
  http_result := null
  transport_threw := false
@@ -1865,14 +1930,7 @@ func execute_embeddings_request_once(client, payload, resolved_options, attempt,
 			return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
 		}
 		case Err(error): {
-			result := standard_error_response_impl(
-				client,
-				"network_error",
-				error,
-				0,
-				null,
-				true
-			)
+			result := transport_error_result(client, error, resolved_options, request_context)
 			return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
 		}
 		case other: {
@@ -2976,6 +3034,7 @@ func execute_request_once(client, messages, options, resolved_options, payload, 
 	}
 	request_options["_headers"] := request_context["headers"]
 	request_options["_body"] := request_context["body"]
+	request_options = transport_options(request_options, resolved_options)
 
  http_result := null
  transport_threw := false
@@ -3070,14 +3129,7 @@ func execute_request_once(client, messages, options, resolved_options, payload, 
 			return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
 		}
 		case Err(error): {
-			result := standard_error_response_impl(
-				client,
-				"network_error",
-				error,
-				0,
-				null,
-				true
-			)
+			result := transport_error_result(client, error, resolved_options, request_context)
 			return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
 		}
 		case other: {

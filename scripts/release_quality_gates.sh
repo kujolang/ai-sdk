@@ -60,14 +60,16 @@ run_test_suite_with_floor() {
 
 bash scripts/verify_docs.sh
 python3 tests/wrapper_regression_tests.py
+python3 tests/runtime_transport_tests.py
 
 TOTAL_TEST_COUNT=0
-MIN_TOTAL_TEST_FLOOR=179
+MIN_TOTAL_TEST_FLOOR=182
 
 run_test_suite_with_floor tests/model_catalog_tests.kujo 10
 run_test_suite_with_floor tests/hardening_regression_tests.kujo 7
 run_test_suite_with_floor tests/state_persistence_tests.kujo 12
 run_test_suite_with_floor tests/atomic_accounting_tests.kujo 12
+run_test_suite_with_floor tests/transport_policy_tests.kujo 3
 run_test_suite_with_floor tests/provider_driver_contract_tests.kujo 5
 run_test_suite_with_floor tests/openai_compatible_driver_regression_tests.kujo 4
 run_test_suite_with_floor tests/external_driver_fixture_tests.kujo 5

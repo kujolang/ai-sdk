@@ -1,0 +1,36 @@
+test_setup {
+ from src.ai_sdk import create_client, chat_completion, embeddings
+ from src.providers import openai_provider
+}
+
+test "transport receives download bound and no redirects under endpoint policy" {
+ client := create_client(openai_provider(), "key")
+ options := {"endpoint_allowlist_enabled": true, "endpoint_allowlist_hosts": ["api.openai.com"], "max_raw_response_bytes": 64, "max_retries": 0,
+  "transport": func(url, request) {
+   assert_equal(request["redirects"], "none")
+   assert_equal(request["max_response_bytes"], 64)
+   return Err("fixture")
+  }}
+ assert_equal(chat_completion(client, [], options)["error"]["code"], "network_error")
+ assert_equal(embeddings(client, "x", options)["error"]["code"], "network_error")
+}
+
+test "legacy redirect behavior and runtime ceiling remain compatible" {
+ client := create_client(openai_provider(), "key")
+ options := {"max_raw_response_bytes": 10000000, "max_retries": 0,
+  "transport": func(url, request) {
+   assert_equal(request["redirects"], "follow")
+   assert_equal(request["max_response_bytes"], 8388608)
+   return Err("fixture")
+  }}
+ assert_equal(chat_completion(client, [], options)["error"]["code"], "network_error")
+}
+
+test "invalid redirect and incremental custom transport options fail before transport" {
+ client := create_client(openai_provider(), "key")
+ for options in [{"redirects": "sometimes"}, {"on_transport_chunk": "invalid"}, {"on_transport_chunk": func(e) {}, "transport": func(u,o) {throw "must not call"}}] {
+  result := chat_completion(client, [], options)
+  assert_equal(result["error"]["code"], "config_error")
+  assert_equal(result["error"]["retryable"], false)
+ }
+}
