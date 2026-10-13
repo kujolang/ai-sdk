@@ -1,3 +1,13 @@
+## In-memory persistence follow-up — 2026-10-12
+
+The single-process persistence finding below is resolved. Runtime `shared_get`/`shared_set` storage retains explicit counter buckets on both Kujo 1.5.0 and 1.6.0 despite dictionary value copying. New clients receive opaque identities; copies share that identity, independently created clients do not. Dictionary backends seed per-client/namespace state, and explicit registry IDs share backend counters across clients. Existing hook precedence, key formats, error/response schemas and seed overrides remain compatible. New state inspection and cleanup exports document lifecycle ownership; no disk persistence, automatic eviction, credentials or payload storage is introduced.
+
+Validation: 7 of the initial 8 focused regressions failed against the original implementation on both runtimes. The completed 12-case suite passes on both, covering local tokens, all three cost-backend modes, dictionary seeds and isolation, registry sharing/namespaces, breaker persistence, seed overrides, reentrant admission, trace sequences, snapshots and cleanup. Existing transport/descriptor cleanup regressions now inspect live state rather than unchanged caller dictionaries. Full release gates pass on each runtime: **167 Kujo tests, 2 Python wrapper tests**, examples, contract schemas, documentation and six benchmark thresholds. Supply-chain policy and whitespace checks pass. Logs: `artifacts/state-persistence/`; runtime binaries/checksums are the same as the preceding audit.
+
+`client_state` reports local counters, not a fresh external-backend read. Client cleanup restores seeds but leaves shared registries intact; registry cleanup requires quiescent users and does not erase their local fallback counters. Compound updates remain non-atomic; persistent hook failures still fail open. These existing distributed-governance concerns remain open in SignalBox `sig_7a8e3644-16cf-4024-a23f-6eab0be037cc`. The narrower persistence signal `sig_1ef6f2be-06c2-46eb-b46f-0f7303e2c093` is resolved by this follow-up. Earlier sections below are retained as historical evidence, including their original unresolved status. No live-provider or hosted-CI validation is claimed.
+
+---
+
 # AI SDK hardening audit — October 12, 2026
 
 - Repository: `kujolang/ai-sdk`, branch `main`; write scope: this repository.

@@ -26,6 +26,8 @@ The format is based on Keep a Changelog and this project follows semantic versio
 
 ### Fixed
 
+- Persist process-local governance, breaker, admission, and trace counters across value-copied client calls on Kujo 1.5 and 1.6; add state inspection and explicit cleanup APIs.
+
 - Forward original embedding input to native provider encoders and finalize descriptor failures with zero-attempt observability.
 - Preserve streaming cache/reasoning usage metadata across frames without usage.
 - Persist completed token/cost usage before budget or structured-output rejection, and recheck rolling budgets before retrying structured output.
