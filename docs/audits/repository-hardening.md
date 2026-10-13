@@ -3,6 +3,7 @@
 - Repository: `kujolang/ai-sdk`, branch `main`; write scope: this repository.
 - Starting SHA: `71bad1468fbc97eab830a27c185c032f07fd76cf` (clean).
 - Ending implementation/documentation SHA: `56d6b4ca7baec07c4abec00c1f5bec10260be2da`; the subsequent report-only commit is identified by `git log -1 --format=%H -- docs/audits/repository-hardening.md`. This avoids a self-referential commit hash.
+- Integration: initial push was rejected because remote `main` already contained release commits. Merged `origin/main` at `1f4c7678506d2ce76e26e67e4697e08ceca108c2` without conflicts in merge `9ef1bbf4a7314f45d08cff5da9bc1130a005652f`. The upstream changes set package 1.1.1 / minimum Kujo 1.6.0, use pinned setup actions and preserve a maintainer-authorized live-provider waiver for v1.1.1 only. No runtime source changed in this merge.
 - Runtime: installed `/Users/robertdevore/.local/bin/kujo`, `kujo 1.5.0`.
 - Purpose: library for normalized chat/embeddings, native provider drivers, model catalogs, governance and metadata telemetry. No standalone SDK CLI.
 - Dependencies: zero Kennel runtime/dev packages before and after. Kujo owns HTTP, JSON, value semantics and execution. Verification uses Bash, Python standard library, rsync, Git and shasum. No dependencies added or updated.
@@ -51,7 +52,7 @@ No model prompt/tool schema/context policy changed; no token savings are claimed
 Security review preserved host binding, HTTPS/local opt-in, protected headers, driver exception containment, configured response-size guards, redaction and bounded retries. This pass hardens accounting and failure lifecycle; it does not certify every provider or the runtime HTTP implementation. Drivers remain trusted executable code. Response limits apply after receipt; buffered callbacks do not establish bounded download memory or incremental network delivery. Existing transport follow-up remains `cap_4c3353ba-2dd7-4ad1-aa9f-00c260e8907d`.
 
 - **P0:** none established.
-- **P1:** In-memory state does not persist across calls on installed Kujo 1.5.0. With budget 20 and fixture usage 20, two calls both succeed for a reused client with null, `{state:{}}`, and `{registry_id:"audit-state-probe"}` backends. Client counter remains absent. See `state-probe.kujo`/`.log` in local evidence. Explicit persistent backend hooks work in the new regressions. Portable state handles and runtime compatibility require a deliberate contract; silently changing client value semantics or adding hidden filesystem persistence is not safe. Documented mitigation: persistent hooks and externally serialized admission. This extends the existing non-atomic/fail-open backend design concern; hook failures and distributed races remain unresolved.
+- **P1:** In-memory state does not persist across calls on installed Kujo 1.5.0 or the checksum-verified published Kujo 1.6.0 binary. With budget 20 and fixture usage 20, two calls both succeed for a reused client with null, `{state:{}}`, and `{registry_id:"audit-state-probe"}` backends. Client counter remains absent. See `state-probe.kujo`/`.log` in local evidence. Explicit persistent backend hooks work in the new regressions. Portable state handles and runtime compatibility require a deliberate contract; silently changing client value semantics or adding hidden filesystem persistence is not safe. Documented mitigation: persistent hooks and externally serialized admission. This extends the existing non-atomic/fail-open backend design concern; hook failures and distributed races remain unresolved.
 - **P2:** no further implementation change admitted without more evidence.
 - **P3 / not worth changing:** whole-core rewrite, removal of public compatibility adapters, dependency substitution and arbitrary response/token truncation.
 - **Needs more evidence:** hosted CI against pinned runtime refs, live provider conformance and runtime redirect/download/streaming guarantees. No secrets/network inference required by local verification.
@@ -60,7 +61,7 @@ Cross-repository review: Kujo runtime/state contract owners should agree on supp
 
 ## Contract statement
 
-Public exports/signatures, CLI commands, file formats, schemas, config fields, environment variables and package/contract versions are unchanged. Descriptor errors gain zero-attempt observability; normalized usage metadata is preserved. Configured persistent governance records usage previously lost on rejection, so external consumers may observe higher accurate totals and earlier retry termination. Failed transport/HTTP calls with no normalized successful usage are not assigned fabricated token charges.
+The audit fixes leave public exports/signatures, CLI commands, file formats, schemas, config fields, environment variables and contract versions unchanged. Integrated upstream release metadata sets package 1.1.1 and minimum Kujo 1.6.0. Descriptor errors gain zero-attempt observability; normalized usage metadata is preserved. Configured persistent governance records usage previously lost on rejection, so external consumers may observe higher accurate totals and earlier retry termination. Failed transport/HTTP calls with no normalized successful usage are not assigned fabricated token charges.
 
 ## Exact verification commands
 
@@ -86,6 +87,12 @@ All run from repository root unless stated. Logs are under `artifacts/audit-2026
 | `git diff --check` | PASS after removing one introduced trailing space |
 
 An intermediate persistence fixture omitted `write_file(..., true)` and therefore failed on overwriting its JSON state. Explicit overwrite fixed the test-only backend; no production errors were concealed or timeouts relaxed.
+
+## Remote integration verification
+
+Downloaded `kujo-v1.6.0-macos-x64.tar.gz` and its `.sha256` via `gh release download v1.6.0 --repo kujolang/kujo --pattern kujo-v1.6.0-macos-x64.tar.gz --pattern kujo-v1.6.0-macos-x64.tar.gz.sha256 --dir artifacts/audit-2026-10-12/runtime16`. `shasum -a 256 -c kujo-v1.6.0-macos-x64.tar.gz.sha256` passed in that directory before extraction. Binary hash `930e0da1fec2562f6990d1226a479330640c8c78eb4c36c148cee3f950b29a47` matches the upstream release evidence.
+
+The merged source was verified with `KUJO_BIN="$PWD/artifacts/audit-2026-10-12/runtime16/kujo" bash scripts/release_quality_gates.sh`: 155 Kujo tests, 2 Python tests, documentation, schemas, examples and benchmarks passed. `artifacts/audit-2026-10-12/runtime16/kujo run artifacts/audit-2026-10-12/state-probe.kujo --interpreter` reproduced the same in-memory limitation. Updated supply-chain policy, documentation links and `git diff --check` passed. The source artifact guard passed for the three audit commits before integration; final range is checked against upstream release head. Hosted execution and live inference remain unverified.
 
 ## Durable records
 

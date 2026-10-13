@@ -6,7 +6,7 @@ Treat external driver packages as executable dependencies. Review and pin them a
 
 ## State enforcement limits
 
-Use persistent `state_backend.get`/`set` hooks and externally serialized admission for cross-call enforcement. On Kujo 1.5.0, client-local and `state`/`registry_id` dictionary writes do not persist across SDK calls in local probes. Hooks remain non-atomic and fail-open on exceptions; these controls do not provide a strict distributed spending limit. See the [audit](audits/repository-hardening.md) for evidence and remaining design work.
+Use persistent `state_backend.get`/`set` hooks and externally serialized admission for cross-call enforcement. On Kujo 1.5.0 and 1.6.0, client-local and `state`/`registry_id` dictionary writes do not persist across SDK calls in local probes. Hooks remain non-atomic and fail-open on exceptions; these controls do not provide a strict distributed spending limit. See the [audit](audits/repository-hardening.md) for evidence and remaining design work.
 
 ## Operational Profile
 

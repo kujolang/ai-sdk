@@ -663,8 +663,8 @@ kujo run scripts/stress_harness.kujo
 - Run contract tests before pushing.
 - Keep response-contract changes backward-compatible whenever possible.
 - Document any breaking contract changes in this README.
-- CI runtime builds are pinned to a fixed Kujo commit in .github/workflows/ci.yml (`KUJO_RUNTIME_REF`) for reproducibility.
-- Runtime compatibility checks also run through .github/workflows/compatibility-matrix.yml across pinned runtime refs.
+- CI installs the published Kujo 1.6.0 runtime through an immutable checksum-verifying setup action.
+- Runtime compatibility checks also run through .github/workflows/compatibility-matrix.yml for Kujo 1.5.0 and 1.6.0.
 - Release validation runs via .github/workflows/release-validation.yml with deterministic contract checks plus optional live-provider smoke validation when provider secrets are configured.
 - Release/prerelease events require live-provider smoke evidence (provider secret required), with manual-only override on `workflow_dispatch`.
 - Release quality thresholds are enforced via scripts/release_quality_gates.sh.
@@ -683,4 +683,4 @@ Shared `state_backend` hooks currently fall back to client-local state when read
 
 Completed provider usage is charged through the configured state backend before rolling-budget rejection or structured-output validation. Structured-output retries recheck rolling budgets before sending another request. Native embedding encoders receive the original `input` value. Streaming usage metadata is retained across frames that omit usage or report `null`.
 
-On Kujo 1.5.0, client dictionaries and the in-memory `state`/`registry_id` backends did not retain writes across calls in local probes. Use explicit persistent `get`/`set` backend hooks for cross-call accounting; those hooks are still best-effort and non-atomic. Do not treat client-local admission or counters as a process-wide enforcement boundary.
+On Kujo 1.5.0 and 1.6.0, client dictionaries and the in-memory `state`/`registry_id` backends did not retain writes across calls in local probes. Use explicit persistent `get`/`set` backend hooks for cross-call accounting; those hooks are still best-effort and non-atomic. Do not treat client-local admission or counters as a process-wide enforcement boundary.
