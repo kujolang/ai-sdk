@@ -1,3 +1,100 @@
+# AI SDK hardening audit — October 12, 2026
+
+- Repository: `kujolang/ai-sdk`, branch `main`; write scope: this repository.
+- Starting SHA: `71bad1468fbc97eab830a27c185c032f07fd76cf` (clean).
+- Ending implementation/documentation SHA: `56d6b4ca7baec07c4abec00c1f5bec10260be2da`; the subsequent report-only commit is identified by `git log -1 --format=%H -- docs/audits/repository-hardening.md`. This avoids a self-referential commit hash.
+- Runtime: installed `/Users/robertdevore/.local/bin/kujo`, `kujo 1.5.0`.
+- Purpose: library for normalized chat/embeddings, native provider drivers, model catalogs, governance and metadata telemetry. No standalone SDK CLI.
+- Dependencies: zero Kennel runtime/dev packages before and after. Kujo owns HTTP, JSON, value semantics and execution. Verification uses Bash, Python standard library, rsync, Git and shasum. No dependencies added or updated.
+- Integrations inspected: public provider-package contract, Ollama embedding encoder (reads `context["input"]`), Anthropic provider adapter, Agents SDK adapter/stream contracts, Dispatch catalog and Watchdog metadata contracts. No sibling files changed; no downstream update required for these fixes.
+
+## Baseline and audit coverage
+
+Read all six implementation modules, exports/manifests, README, architecture/runbook and public contracts; inspected tests/fixtures, examples, scripts, eval configuration, schema checks, CI/release/compatibility workflows, wrapper and artifact policy. Reviewed hot paths, resource lifetime, error boundaries, provider/descriptor input, protected headers, endpoint host checks, credential redaction, response limits, retries/fallbacks, state persistence, shared governance, shell/process operations and generated catalog output.
+
+The original full release gate passed **150 Kujo tests plus 2 Python wrapper tests**, documentation command checks, schemas, examples and all six performance thresholds. The live-smoke test selected the credential-free skip branch; this is not live-provider evidence. No separate package build, lint, formatter or type-check script is configured. Smoke/benchmark commands are warning-gated. Hosted pinned-runtime workflows were not executed locally.
+
+Baseline deficiencies reproduced in an isolated archive of the starting commit with the final new tests copied in: five hardening regressions failed and the strengthened native embedding test failed. Existing tests remained unchanged apart from strengthening the native request assertion. Six local documentation links pointed to four deleted files; existing docs checks missed them. Raw logs and reproduction scripts are ignored local evidence under `artifacts/audit-2026-10-12/`.
+
+## Changes and proof
+
+| Problem / root cause | Implementation / files | Regression evidence | Compatibility / impact |
+| --- | --- | --- | --- |
+| Native embeddings received null: request-context wrapper discarded the payload input | Forward payload input in `src/ai_sdk.kujo` | `tests/external_driver_fixture_tests.kujo` asserts actual encoded passages, not only response vectors; failed before, passes after | Restores documented driver contract; Ollama reads this field. No provider rewrite |
+| Usage metadata erased by each stream frame lacking usage | Initialize usage once; only normalize usage-bearing frames in core | New hardening test preserves cache/reasoning counters, provider usage and total semantics after a null-usage frame | Existing normalized keys and counts preserved; no context truncation |
+| Already-consumed usage lost when token/cost overrun rejected the result; chat/embedding accounting duplicated | One shared post-response accounting helper persists both counters before budget rejection | New persistent `get`/`set` fixture plus chat-token and embedding-cost overrun tests verify storage and next-client rejection | Persistent backends now record accurate consumed usage; unchanged field shapes/error codes. No atomic reservation claim |
+| Structured-output failures escaped accounting and retries reused stale preflight | Account successful provider usage before structured validation; recheck governance before retry | Two 5-token invalid responses exhaust a 10-token limit and prevent a third transport call | Budget enforcement can stop retries earlier; expected correction for configured limits |
+| Descriptor rejection bypassed chat finalization | Use common finalizer with zero attempted calls | Repeated rejection has stable policy error and zero-attempt observability | Additive observability; persistent admission leak was **not** reproduced on the installed value-copying runtime |
+| Docs linked deleted release/backlog files and stated obsolete test floor; new regressions needed a ratchet | README, adoption/API/architecture/runbook/changelog; `verify_docs.sh` checks guide file targets; release gate raises hardening floor 2→7 and aggregate floor 125→155 | Docs pass; injected missing target fails; full release gate passes | File-target checks are offline and limited to inline links in README/top-level guides; no anchor/network claims |
+
+Core accounting duplication was removed only where chat and embeddings had identical behavior; operation-specific fallback estimates remain separate. Exported compatibility decoders and the larger core were retained: downstream uses and protocol differences do not justify a broad rewrite. No dead public API or dependency removal was proven safe.
+
+## Measurements
+
+Paired serial baseline/final runs on the same installed runtime, three trials each, using the unchanged `scripts/benchmark_quality_gate.kujo`. Values are workload milliseconds (300 iterations for normalization, 200 for retry arithmetic), not request network latency:
+
+| Workload | Baseline trials / median | Final trials / median |
+| --- | --- | --- |
+| Chat fixture | 499, 617, 604 / 604 | 476, 524, 603 / 524 |
+| Embedding fixture | 492, 453, 617 / 492 | 448, 478, 479 / 478 |
+| Chat parsing | 659, 626, 934 / 659 | 640, 676, 683 / 676 |
+| Stream parsing | 919, 895, 1539 / 919 | 903, 865, 903 / 903 |
+| Chat retry arithmetic | 326, 337, 481 / 337 | 335, 337, 351 / 337 |
+| Embedding retry arithmetic | 322, 332, 448 / 332 | 329, 321, 426 / 329 |
+
+All unchanged thresholds passed. Variation is substantial; **no general speedup is claimed**. Streaming no longer reconstructs unused usage metadata on every non-usage frame (code-supported reduction of work). Test coverage grew 150→155 Kujo cases plus the strengthened native test; wrapper coverage remains 2 cases. Stress: 3,000 successes / 0 errors.
+
+No model prompt/tool schema/context policy changed; no token savings are claimed. Raw responses and callback event retention remain for compatibility. Gate output remains inspectable and logs are saved to files rather than copied into the final chat. Build size/RSS were not meaningful measurements for this library-only pass; dependency surface remains 0/0.
+
+## Security, resources and remaining work
+
+Security review preserved host binding, HTTPS/local opt-in, protected headers, driver exception containment, configured response-size guards, redaction and bounded retries. This pass hardens accounting and failure lifecycle; it does not certify every provider or the runtime HTTP implementation. Drivers remain trusted executable code. Response limits apply after receipt; buffered callbacks do not establish bounded download memory or incremental network delivery. Existing transport follow-up remains `cap_4c3353ba-2dd7-4ad1-aa9f-00c260e8907d`.
+
+- **P0:** none established.
+- **P1:** In-memory state does not persist across calls on installed Kujo 1.5.0. With budget 20 and fixture usage 20, two calls both succeed for a reused client with null, `{state:{}}`, and `{registry_id:"audit-state-probe"}` backends. Client counter remains absent. See `state-probe.kujo`/`.log` in local evidence. Explicit persistent backend hooks work in the new regressions. Portable state handles and runtime compatibility require a deliberate contract; silently changing client value semantics or adding hidden filesystem persistence is not safe. Documented mitigation: persistent hooks and externally serialized admission. This extends the existing non-atomic/fail-open backend design concern; hook failures and distributed races remain unresolved.
+- **P2:** no further implementation change admitted without more evidence.
+- **P3 / not worth changing:** whole-core rewrite, removal of public compatibility adapters, dependency substitution and arbitrary response/token truncation.
+- **Needs more evidence:** hosted CI against pinned runtime refs, live provider conformance and runtime redirect/download/streaming guarantees. No secrets/network inference required by local verification.
+
+Cross-repository review: Kujo runtime/state contract owners should agree on supported mutable state handles and verify runtime modes before promising local admission/counter persistence. Current fixes do not require a runtime change. Existing HTTP follow-up requires runtime capability evidence before SDK redirect/download guarantees. Compatibility concern: preserve current value semantics and backend hooks rather than introducing implicit shared state. Native package owners can consume the embedding fix through an ordinary SDK revision update; no source rewrite required.
+
+## Contract statement
+
+Public exports/signatures, CLI commands, file formats, schemas, config fields, environment variables and package/contract versions are unchanged. Descriptor errors gain zero-attempt observability; normalized usage metadata is preserved. Configured persistent governance records usage previously lost on rejection, so external consumers may observe higher accurate totals and earlier retry termination. Failed transport/HTTP calls with no normalized successful usage are not assigned fabricated token charges.
+
+## Exact verification commands
+
+All run from repository root unless stated. Logs are under `artifacts/audit-2026-10-12/`.
+
+| Command | Result |
+| --- | --- |
+| `KUJO_BIN=/Users/robertdevore/.local/bin/kujo bash scripts/release_quality_gates.sh` before / after | PASS: 150→155 Kujo tests, 2 Python tests, examples, docs, schema checks and six benchmark thresholds |
+| `kujo test-run tests/hardening_regression_tests.kujo -v` | PASS 7/7; final tests against original archive: 5 failures |
+| `kujo test-run tests/external_driver_fixture_tests.kujo -v` | PASS 5/5; strengthened test fails on original archive |
+| `python3 artifacts/audit-2026-10-12/verify-baseline.py` | Confirmed expected original-source failures; initial Python 3.9 invocation rejected newer tarfile filter keyword, corrected for trusted local Git archive |
+| `python3 artifacts/audit-2026-10-12/compare-benchmarks.py` | PASS: six paired benchmark processes; underlying command `kujo run scripts/benchmark_quality_gate.kujo --interpreter` |
+| `kujo run artifacts/audit-2026-10-12/state-probe.kujo --interpreter` | Reproduces unresolved in-memory persistence limitation in all three modes |
+| `kujo run examples/model_preferences.kujo` | PASS |
+| `./kujo run examples/telemetry_bridge.kujo --interpreter` | PASS |
+| `kujo run scripts/generate_model_catalog.kujo --interpreter -- examples/dispatch-model-catalog.config.json --output artifacts/audit-2026-10-12/catalog.json` | PASS |
+| `kujo run scripts/stress_harness.kujo --interpreter` | PASS: 3000/3000 |
+| `bash scripts/verify_docs.sh` | PASS; isolated copy with appended missing-file link correctly fails |
+| `bash scripts/supply_chain_policy_check.sh` | PASS; immutable action/runtime ref policy, not a current CVE certification |
+| `bash -n kujo scripts/*.sh .github/scripts/*.sh` | PASS |
+| `bash scripts/generate_integrity_manifest.sh artifacts/audit-2026-10-12` then `shasum -a 256 -c artifacts/audit-2026-10-12/integrity-manifest.sha256` | PASS; local manifest only, no new SBOM/attestation claim |
+| `./kujo run examples/main.kujo`, `./kujo run examples/production_profile.kujo`, existence of `kennel.toml` and `kujo.toml` | All four `tests/ai_sdk_eval.json` checks PASS |
+| `git diff --check` | PASS after removing one introduced trailing space |
+
+An intermediate persistence fixture omitted `write_file(..., true)` and therefore failed on overwriting its JSON state. Explicit overwrite fixed the test-only backend; no production errors were concealed or timeouts relaxed.
+
+## Durable records
+
+SignalBox: Capture `cap_13039d36-b35a-4d0c-8325-6975a52026ca`; Signal `sig_1ef6f2be-06c2-46eb-b46f-0f7303e2c093` for in-memory state persistence. Exact-ID retrieval and concept search `in-memory` returned both. Existing distributed-governance and HTTP follow-ups were not duplicated; the new capture explicitly links the earlier governance capture because it adds single-process evidence. Completed fixes, routine results, and speculative rewrites were rejected as capture material. Strata receives the final handoff/current-state timeline with this report and final Git identity.
+
+---
+
+# Historical September 2026 audit
+
 # AI SDK repository hardening receipt
 
 ## Repository
