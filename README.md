@@ -679,7 +679,7 @@ Run `KUJO_BIN="$(command -v kujo)" bash scripts/release_quality_gates.sh` for al
 
 The `./kujo` compatibility wrapper stages execution into a temporary repository copy and removes it on normal success/failure. Generated files in that copy are temporary; use the installed `kujo` command to keep generated outputs in this checkout.
 
-Shared `state_backend` hooks currently fall back to client-local state when reads fail and ignore write-hook exceptions. Their read/modify/write sequence is not atomic across processes. Treat these controls as best-effort accounting, not a strict distributed spending limit; use external serialized admission when strict enforcement is required.
+Legacy `best_effort` `state_backend` hooks fall back to client-local state when reads fail and ignore write-hook exceptions. Their read/modify/write sequence is not atomic across processes. Treat these controls as best-effort accounting, not a strict distributed spending limit; use external serialized admission when strict enforcement is required.
 
 Completed provider usage is charged through the configured state backend before rolling-budget rejection or structured-output validation. Structured-output retries recheck rolling budgets before sending another request. Native embedding encoders receive the original `input` value. Streaming usage metadata is retained across frames that omit usage or report `null`.
 
@@ -689,4 +689,43 @@ A `{state: {...}}` backend supplies seeds and retains writes per client and name
 
 Import `client_state`, `reset_client_state`, and `reset_memory_state_backend` from `ai_sdk` for inspection and lifecycle cleanup. `reset_client_state(client)` releases that client's stored counters and dictionary-backend state, restoring configured seeds; it returns false while requests are active or when no bucket exists. It does not clear a shared registry. `reset_memory_state_backend({registry_id: "my-service"})` clears that registry across namespaces; call it only after all participating requests stop, and reset participating clients too if their local fallback counters should start over. Storage lasts until explicit cleanup or process exit, with no automatic eviction that could silently reset budgets.
 
-These operations fix sequential persistence, including reentrant admission checks. Compound read/modify/write operations remain non-atomic; use externally serialized admission for strict concurrent or distributed limits. They do not provide disk persistence.
+These legacy memory operations fix sequential persistence, including reentrant admission checks. Their compound read/modify/write operations remain non-atomic; use externally serialized admission for strict concurrent or distributed limits. They do not provide disk persistence.
+
+### Atomic concurrent accounting
+
+Use `governance_mode: "strict"` with an atomic backend when concurrent requests share a budget. The existing default, `"best_effort"`, preserves legacy hooks and their failure behavior. Merely selecting an old `state` or `registry_id` backend does not enable atomic accounting.
+
+```kujo
+from src.ai_sdk import atomic_memory_backend, create_client, chat_completion
+from src.providers import openai_provider
+
+backend := atomic_memory_backend()
+client := create_client(openai_provider(), "fixture-key")
+options := {
+    "governance_mode": "strict",
+    "state_backend": backend,
+    "state_namespace": "service-budget",
+    "rolling_token_budget_tokens": 10000,
+    "offline_fixture": true
+}
+result := chat_completion(client, [], options)
+```
+
+Create the backend once and share copies with every participating client. The SDK holds its exclusive lock through preflight, provider execution, retries, and token/cost accounting. A competing or reentrant request fails immediately with non-retryable `state_backend_error`; it never reaches transport. This closes the concurrent preflight and lost-update races. Chat, embeddings, and buffered streaming use the same guard. Independent backend handles remain independent budgets. Do not mix guarded requests with direct backend mutations or legacy requests against the same state.
+
+The built-in backend uses Kujo atomic integer operations, works on 1.5.0 and 1.6.0, and serializes the whole handle (including different namespaces). Its data is process-local. Spawn workers must import the SDK themselves and retrieve a deliberately shared handle through Kujo shared storage; closures are not implicitly transferable in Kujo 1.6. It requires strict mode and refuses accidental use in best-effort mode. Backend state is authoritative in strict mode: missing counters start at zero, independently of client dictionary seeds.
+
+After a read/write exception, malformed counter, or unsuccessful write, strict mode returns a redacted `state_backend_error`. The memory backend is quarantined and rejects new acquisitions after uncertain accounting. Inspect and reconcile consumed usage before calling `backend["reset"]()` to start a new budget; reset clears all namespaces and quarantine, and refuses while locked. It must not be used as an automatic retry. Client cleanup does not clear this backend. The handle keeps four small shared-storage entries until process exit; reset releases accumulated counter data. Lock release failures also return `state_backend_error` rather than a successful result.
+
+External persistent backends can implement the same contract:
+
+| Hook | Required strict behavior |
+| --- | --- |
+| `acquire(scope, owner)` | Atomically take exclusive ownership; return exactly `true` only once acquired. Return `false` when busy/unavailable. Scope is `ai_sdk:<namespace>:governance`; owner is a fresh request UUID. |
+| `get(key, fallback)` | Read authoritative state under ownership; return a nonnegative finite number (integer for token counts). Missing counters use the supplied zero fallback. Throw on outages. |
+| `set(key, value)` | Persist under ownership; return exactly `true` after success. Throw or return another value on failure. |
+| `release(scope, owner, healthy)` | Verify ownership. When healthy, release only after writes are durable. When false, persist quarantine before unlocking; future acquisitions must fail until reconciliation. Return exactly `true` only on successful completion. |
+
+The backend must fence stale owners and maintain exclusion for the entire request, including retries. Do not use an expiring lease that can silently admit another owner while transport is still running. An acquire exception must leave no usable ambiguous ownership. A release failure must retain exclusion/quarantine. All processes using a shared budget must use the same lock and state contract. The SDK cannot make an arbitrary external hook implementation atomic; the built-in backend demonstrates the contract within one process, not distributed durability.
+
+Strict mode rejects mixed `state`/`registry_id` backends and nonempty `fallback_providers` before any provider call, preventing a fallback from silently changing the protected budget. Other existing request options and response contract 1.0.0 are preserved. There are no new environment variables. One completed request may still exceed the remaining budget and is charged before rejection, as before; serialization is not a provider-side hard spending cap. Unknown provider completion after a transport failure and recovery after process loss still require external reconciliation.

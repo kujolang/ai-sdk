@@ -1,3 +1,20 @@
+## Atomic concurrent accounting follow-up — 2026-10-12
+
+Implemented the opt-in fail-closed contract requested by governance SignalBox `sig_7a8e3644-16cf-4024-a23f-6eab0be037cc`. `governance_mode: "strict"` takes backend ownership before preflight and retains it through provider execution, retries and both counter writes. Contention and hook failures produce non-retryable, redacted `state_backend_error` in the existing error schema. A failed operation releases with an unhealthy flag, requiring quarantine before another acquisition. Admitted chat state is finalized when accounting throws. Stream calls use the same guard.
+
+`atomic_memory_backend()` implements atomic admission using the Kujo runtime's locked integer increment, with owner checking, authoritative state and quarantine after uncertain writes. Initialize one handle and share it with participating clients. Reset is explicit and refuses active owners. External backends receive a documented acquire/get/set/release contract with fencing and durable quarantine requirements. Legacy best-effort behavior, signatures, key formats, version 1.0.0 response schemas and the minimum runtime version remain unchanged; strict mode rejects legacy memory-backend fields and provider fallback to prevent unguarded scope changes.
+
+Verification on installed Kujo 1.5.0 and checksum-verified published 1.6.0:
+
+- Full `scripts/release_quality_gates.sh`: **179 Kujo tests, 2 Python wrapper tests**, examples, schemas, docs and unchanged benchmark thresholds pass on each runtime.
+- Twelve focused atomic-accounting tests pass on each runtime, including spawned-thread overlap with an explicit barrier, reentrant contention, token/cost totals, authoritative zero defaults despite local seeds, lock ownership, partial writes, outage quarantine/reset, malformed counters, throwing lock hooks, streaming and live-state cleanup after accounting exceptions.
+- A staged copy of starting commit `17bb65d` with only the new backend fixture exposed fails 9 of those 12 tests on both runtimes. The three passing cases exercise the standalone factory or retained legacy behavior; the nine failures establish missing guarded accounting behavior in the old SDK.
+- Final strengthened focused tests pass after the full gates; docs, supply-chain policy, model preference/catalog generation and telemetry examples pass. Evidence: `artifacts/concurrent-accounting/` (local ignored logs and probes). No sibling repository code changed.
+
+Scope: concurrent lost updates and preflight races are closed for requests participating in the strict contract. Existing best-effort clients remain best-effort for compatibility. Serialization is not a provider-side hard cap: one completed request can exceed the remaining budget and is still charged before rejection. Unknown transport completion, process loss and incorrectly implemented external locks require external reconciliation; no live distributed service or hosted-CI validation is claimed. The unrelated runtime transport follow-up remains separate. Earlier report sections below retain their historical status and are superseded by this opt-in contract where applicable.
+
+---
+
 ## In-memory persistence follow-up — 2026-10-12
 
 The single-process persistence finding below is resolved. Runtime `shared_get`/`shared_set` storage retains explicit counter buckets on both Kujo 1.5.0 and 1.6.0 despite dictionary value copying. New clients receive opaque identities; copies share that identity, independently created clients do not. Dictionary backends seed per-client/namespace state, and explicit registry IDs share backend counters across clients. Existing hook precedence, key formats, error/response schemas and seed overrides remain compatible. New state inspection and cleanup exports document lifecycle ownership; no disk persistence, automatic eviction, credentials or payload storage is introduced.

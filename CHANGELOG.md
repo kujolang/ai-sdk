@@ -26,6 +26,8 @@ The format is based on Keep a Changelog and this project follows semantic versio
 
 ### Fixed
 
+- Add opt-in strict atomic governance for concurrent accounting, with an in-memory backend, fail-closed hook validation, quarantine and guarded chat/embedding/stream requests; preserve legacy best-effort defaults.
+
 - Persist process-local governance, breaker, admission, and trace counters across value-copied client calls on Kujo 1.5 and 1.6; add state inspection and explicit cleanup APIs.
 
 - Forward original embedding input to native provider encoders and finalize descriptor failures with zero-attempt observability.

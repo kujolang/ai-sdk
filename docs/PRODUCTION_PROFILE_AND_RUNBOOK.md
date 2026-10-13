@@ -6,7 +6,7 @@ Treat external driver packages as executable dependencies. Review and pin them a
 
 ## State enforcement limits
 
-Client-local counters and `state`/`registry_id` backends now persist within the process on Kujo 1.5.0 and 1.6.0. Use `create_client`, inspect with `client_state`, and clean up idle clients/registries explicitly as described in the [README](../README.md). Use persistent `state_backend.get`/`set` hooks for storage across process restarts. Compound updates remain non-atomic, and hooks fail open on exceptions; strict concurrent or distributed enforcement still needs externally serialized admission.
+Client-local counters and `state`/`registry_id` backends now persist within the process on Kujo 1.5.0 and 1.6.0. Use `create_client`, inspect with `client_state`, and clean up idle clients/registries explicitly as described in the [README](../README.md). Use persistent `state_backend.get`/`set` hooks for storage across process restarts. Legacy compound updates remain non-atomic, and hooks fail open on exceptions. For concurrent accounting, opt into `governance_mode: "strict"` with a shared `atomic_memory_backend()` handle or a persistent backend implementing the documented atomic acquire/release contract. Strict errors require backend reconciliation before retrying; never automatically reset a quarantined budget. Distributed adapters must fence stale owners and preserve quarantine durably.
 
 ## Operational Profile
 
