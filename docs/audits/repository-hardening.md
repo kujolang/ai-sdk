@@ -1,3 +1,51 @@
+## Runtime transport follow-up — 2026-10-13
+
+Scope: `kujolang/ai-sdk` main, starting `e28a57469e366b3f8265270f05f5cb00eee9b3a3`, implementation ending `541bcd2`; the user explicitly authorized Kujo runtime changes and source backports. Runtime main starts at `6695bd9beac4787c9d2db768e9f61dfdb26a95a5` and ends at `d6ed9c0cfa76a1f17fb87020b9e9a77950c7fc25`. Source backports are `302bbb19ac4fb661843e4e2e3d633f7bae5d794b` on `codex/http-stream-consumer-1.5` (base `v1.5.0`, `cc2d7dbb59a8dc05f00d629e100932f56f4062f6`) and `92e0e0a8125da5d005c1e4f5f9a9784f436158a9` on `codex/http-stream-consumer-1.6` (base `v1.6.0`, `44af277848173664f72ca85f2a1b3b98d634ecdd`). Release tags and published binaries are unchanged.
+
+| Problem and root cause | Implementation | Evidence and compatibility |
+| --- | --- | --- |
+| SDK endpoint allowlists validated only the first URL while native HTTP followed redirects | Forward explicit redirect policy; force `none` under endpoint allowlists | Real 307 redirect to a different host is not followed under the allowlist in VM/interpreter. Default `follow` remains without an allowlist; explicit `none` is additive |
+| Configured raw response limits were applied after native download | Forward positive integer byte limits before native reading, preserving the 8 MiB ceiling; normalize size failures as terminal `response_too_large` | Content-Length and chunked overflow, chat and embeddings, one request despite configured retries |
+| Runtime incremental bodies could be forwarded by a server but not consumed by SDK code | Add capability-gated `http_stream_collect(response, callback)` and `http_request(..., {response_stream:"collect"}, callback)` in Kujo; SDK `on_transport_chunk` opts into it | Server withholds the rest of its body until a callback marker appears. Split UTF-8, cancellation, thrown callbacks, reentrant aliases, single use, and denied capabilities are covered |
+| Native HTTP error dictionaries included non-JSON byte buffers | Omit native byte values in raw error envelopes | Non-JSON 307 responses now remain serializable in the existing error schema |
+| Retrying a failed incremental request could replay already-observed text | Native incremental failures and final structured-output failures are terminal | Callback cancellation/exception, byte overflow, and invalid final structured output cause no replay; legacy custom `Err` transport behavior stays retryable |
+
+Source changes are in `src/ai_sdk.kujo`; regression coverage is in `tests/transport_policy_tests.kujo` and `tests/runtime_transport_tests.py`, with the release gate floor raised from 179 to 182. The Python standard-library harness provides an independent loopback server only; actual SDK behavior remains Kujo. Runtime changes are limited to HTTP collection, builtin registration, type/arity metadata, capability mapping, unit tests, and API documentation. No new dependency, response-schema version, CLI flag, file format, or SDK environment variable was introduced. Custom transports keep their two-argument signature and must enforce forwarded transport limits themselves.
+
+The new hook exposes transport text fragments, not normalized semantic deltas. Existing normalized streaming callback timing is unchanged. Collection retains the bounded complete body for final decoding; no constant-memory sink claim is made. Cancellation cannot establish provider billing completion. Unpatched published 1.5/1.6 reject opt-in collection before I/O with `unsupported_feature`; their redirect/download fixes work without a runtime upgrade. Signed/query authentication remains outside the existing descriptor contract.
+
+### Verification
+
+| Runtime / check | Result |
+| --- | --- |
+| Published 1.5.0, final serial `scripts/release_quality_gates.sh` | Pass: 182 Kujo contracts, 2 wrapper tests, 4 HTTP harness tests with 2 consumer-only skips, examples, schemas, docs, and unchanged benchmark gates |
+| Published 1.6.0, final serial release gate | Pass: the same 182 contracts, 2 wrapper tests, 4 HTTP tests with 2 consumer-only skips, examples, schemas, docs, and unchanged benchmark gates |
+| Source backports 1.5.0 and 1.6.0 | Each passes all 182 contracts and all 6 live HTTP harness tests; consumer capability is required, so none skip |
+| Current runtime 1.8.1 source | 6 HTTP harness tests, 3 transport policy tests, 31 core SDK contracts, 2 new collector unit tests, 2 existing incremental HTTP unit tests, and all 5 standard-library inventory tests pass |
+| Formatting / ancillary checks | `cargo fmt --check` passes on all three source checkouts; SDK docs, supply-chain checks, model preferences, catalog generation and telemetry examples pass |
+
+Before/after proof: staging only the three new policy regressions into starting SDK `e28a574` yields **0/3 passing on both published runtimes**; the completed SDK passes 3/3. The published runtimes lack the readable consumer API; opt-in rejection before any server request is separately asserted. Actual incremental delivery is proven on each patched runtime by the server waiting for the first callback before sending the remainder, in both VM and interpreter modes.
+
+Build commands were `CARGO_PROFILE_DEV_DEBUG=0 cargo build --manifest-path ../kujo/Cargo.toml --no-default-features --features runtime-network,runtime-db --bin kujo` for current Kujo and `CARGO_PROFILE_DEV_DEBUG=0 CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR=/tmp/kujo-backport-target cargo build --manifest-path /tmp/ai-sdk-kujo15/Cargo.toml --no-default-features --features runtime-db --bin kujo` for 1.5. The 1.6 command uses its corresponding source path and additionally `--locked`. No lockfile changed. Backports were checked out from the exact tags above, committed on separate branches, and never substituted for installed runtimes.
+
+Run HTTP verification with `KUJO_BIN=<binary> python3 tests/runtime_transport_tests.py`; add `KUJO_REQUIRE_STREAM_COLLECT=1` for each patched binary. The 19 contract suites listed in `scripts/release_quality_gates.sh` were run individually through `./kujo test-run`, with their existing floors and zero failures enforced by local `artifacts/runtime-transport/backport_contracts.py`. Unoptimized backport contract runs use the existing Rust setting `RUST_MIN_STACK=16777216`: the default debug worker stack overflowed in the atomic suite, including with the starting SDK on the same binary; the 16 MiB setting passes all 12 atomic tests. This is a test-build qualification, not a new SDK setting or a claim that default debug worker stacks support every workload. Published optimized runtime gates use normal stack settings. Native HTTP tests pass without this adjustment.
+
+Current runtime unit/inventory commands use `CARGO_PROFILE_DEV_DEBUG=0 CARGO_BUILD_JOBS=2 cargo test --manifest-path ../kujo/Cargo.toml --no-default-features --features runtime-network,runtime-db`, followed respectively by `--lib stream_collect`, `--lib http_request_incremental`, and `--test stdlib_reference_contract`. Full runtime-wide/JIT suites were not run; verification targets the changed HTTP boundary and SDK consumers.
+
+Early simultaneous published gates passed contracts but failed stream-parsing benchmarks under compilation load (1.5: 43.203 ms; 1.6: 51.723 ms, threshold 40 ms). Those failures remain in the logs. Final gates pass serially after this task's builds, with unchanged thresholds: stream parsing measures 13.747 ms on 1.5 and 18.717 ms on 1.6. No speedup is inferred from these load-sensitive measurements. Temporary build caches/worktrees were removed after verification; frozen patched binaries moved to `/tmp/ai-sdk-transport-binaries/` so the SDK wrapper does not repeatedly stage them.
+
+| Binary evidence | SHA-256 |
+| --- | --- |
+| Published 1.5.0 | `3e1e475ea165c8b4a714495596fe8661ad970b27119ad44f1db4d9779f7f05d4` |
+| Published 1.6.0 | `930e0da1fec2562f6990d1226a479330640c8c78eb4c36c148cee3f950b29a47` |
+| Patched current source | `3e59516bd9647b336867c8203c82c9cb33582ebdeee57df90c9cb891c0a1226d` |
+| Patched 1.5.0 source | `49dac28f3f6413067ce63c637b45fc6df9e1eb5917900cd546657c71d293ac85` |
+| Patched 1.6.0 source | `f78c6f324ee36c305d4112e6d17ffab2a692d0d23a769a66ad21e0b39fd0509f` |
+
+Evidence is under ignored local `artifacts/runtime-transport/`. Earlier report sections below retain their historical status; this section supersedes their open redirect/download/incremental-consumption limitations. No throughput, memory-reduction, or model-token savings claim is made. Hosted CI, other operating systems, JIT execution, and paid provider conformance were not exercised in this local transport pass.
+
+---
+
 ## Atomic concurrent accounting follow-up — 2026-10-12
 
 Implemented the opt-in fail-closed contract requested by governance SignalBox `sig_7a8e3644-16cf-4024-a23f-6eab0be037cc`. `governance_mode: "strict"` takes backend ownership before preflight and retains it through provider execution, retries and both counter writes. Contention and hook failures produce non-retryable, redacted `state_backend_error` in the existing error schema. A failed operation releases with an unhealthy flag, requiring quarantine before another acquisition. Admitted chat state is finalized when accounting throws. Stream calls use the same guard.
