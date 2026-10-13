@@ -1,0 +1,16 @@
+# Test-only persistence: explicit hooks work across value-copied client dictionaries.
+export file_backend := func(path) {
+ write_file(path, "{}")
+ return {
+  "get": func(key, fallback) {
+   state := parse_json(read_file(path))
+   if has_key(state, key) { return state[key] }
+   return fallback
+  },
+  "set": func(key, value) {
+   state := parse_json(read_file(path))
+   state[key] = value
+   write_file(path, to_json(state), true)
+  }
+ }
+}

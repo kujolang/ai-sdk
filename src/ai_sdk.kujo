@@ -1218,10 +1218,16 @@ func enforce_governance_preflight(client, messages, payload, resolved_options) {
 }
 
 func apply_governance_post_response(client, result, messages, payload, resolved_options) {
-	if !result["ok"] {
-		return result
+	if !result["ok"] { return result }
+	if dict_get_or(resolved_options, "rolling_token_budget_tokens", 0) <= 0 && dict_get_or(resolved_options, "rolling_cost_budget_cents", 0.0) <= 0 { return result }
+	estimated_tokens := 0
+	if dict_get_or(dict_get_or(result, "usage", {}), "total_tokens", 0) <= 0 {
+		estimated_tokens = planned_request_total_tokens(messages, payload, resolved_options)
 	}
+	return apply_usage_governance(client, result, estimated_tokens, resolved_options)
+}
 
+func apply_usage_governance(client, result, estimated_tokens, resolved_options) {
 	rolling_token_budget := dict_get_or(resolved_options, "rolling_token_budget_tokens", 0)
 	rolling_cost_budget_cents := dict_get_or(resolved_options, "rolling_cost_budget_cents", 0.0)
 	cost_per_1k_tokens_cents := dict_get_or(resolved_options, "estimated_cost_per_1k_tokens_cents", 0.0)
@@ -1232,11 +1238,20 @@ func apply_governance_post_response(client, result, messages, payload, resolved_
 	usage := dict_get_or(result, "usage", {})
 	request_tokens := dict_get_or(usage, "total_tokens", 0)
 	if request_tokens <= 0 {
-		request_tokens := planned_request_total_tokens(messages, payload, resolved_options)
+		request_tokens := estimated_tokens
 	}
 
 	tokens_used := load_governance_token_usage(client, resolved_options)
 	projected_tokens := tokens_used + request_tokens
+	cost_used := load_governance_cost_usage(client, resolved_options)
+	request_cost_cents := 0.0
+	if cost_per_1k_tokens_cents > 0 {
+		request_cost_cents := (request_tokens * cost_per_1k_tokens_cents) / 1000.0
+	}
+	projected_cost := cost_used + request_cost_cents
+	# The provider has already consumed this usage, even if a budget rejects it.
+	persist_governance_token_usage(client, resolved_options, projected_tokens)
+	persist_governance_cost_usage(client, resolved_options, projected_cost)
 	if rolling_token_budget > 0 {
 		if projected_tokens > rolling_token_budget {
 			return governance_error_response(
@@ -1253,12 +1268,6 @@ func apply_governance_post_response(client, result, messages, payload, resolved_
 		}
 	}
 
-	cost_used := load_governance_cost_usage(client, resolved_options)
-	request_cost_cents := 0.0
-	if cost_per_1k_tokens_cents > 0 {
-		request_cost_cents := (request_tokens * cost_per_1k_tokens_cents) / 1000.0
-	}
-	projected_cost := cost_used + request_cost_cents
 	if rolling_cost_budget_cents > 0 {
 		if projected_cost > rolling_cost_budget_cents {
 			return governance_error_response(
@@ -1275,8 +1284,6 @@ func apply_governance_post_response(client, result, messages, payload, resolved_
 		}
 	}
 
-	persist_governance_token_usage(client, resolved_options, projected_tokens)
-	persist_governance_cost_usage(client, resolved_options, projected_cost)
 	return result
 }
 
@@ -1326,6 +1333,7 @@ func normalize_stream_success_response(client, status_code, stream_events, fallb
 		"output_tokens": 0,
 		"total_tokens": 0
 	}
+	usage = normalize_usage_fields(null, usage)
 
 	i := 0
 	while i < len(stream_events) {
@@ -1362,7 +1370,9 @@ func normalize_stream_success_response(client, status_code, stream_events, fallb
 			}
 
 			raw_usage := dict_get_or(event, "usage", null)
-			usage := normalize_usage_fields(raw_usage, usage)
+			if type(raw_usage) == "dict" {
+				usage := normalize_usage_fields(raw_usage, usage)
+			}
 		}
 
 		i := i + 1
@@ -1497,66 +1507,13 @@ func enforce_embeddings_governance_preflight(client, input_value, payload, resol
 }
 
 func apply_embeddings_governance_post_response(client, result, input_value, payload, resolved_options) {
-	if !result["ok"] {
-		return result
+	if !result["ok"] { return result }
+	if dict_get_or(resolved_options, "rolling_token_budget_tokens", 0) <= 0 && dict_get_or(resolved_options, "rolling_cost_budget_cents", 0.0) <= 0 { return result }
+	estimated_tokens := 0
+	if dict_get_or(dict_get_or(result, "usage", {}), "total_tokens", 0) <= 0 {
+		estimated_tokens = planned_embeddings_total_tokens(input_value)
 	}
-
-	rolling_token_budget := dict_get_or(resolved_options, "rolling_token_budget_tokens", 0)
-	rolling_cost_budget_cents := dict_get_or(resolved_options, "rolling_cost_budget_cents", 0.0)
-	cost_per_1k_tokens_cents := dict_get_or(resolved_options, "estimated_cost_per_1k_tokens_cents", 0.0)
-	if rolling_token_budget <= 0 && rolling_cost_budget_cents <= 0 {
-		return result
-	}
-
-	usage := dict_get_or(result, "usage", {})
-	request_tokens := dict_get_or(usage, "total_tokens", 0)
-	if request_tokens <= 0 {
-		request_tokens := planned_embeddings_total_tokens(input_value)
-	}
-
-	tokens_used := load_governance_token_usage(client, resolved_options)
-	projected_tokens := tokens_used + request_tokens
-	if rolling_token_budget > 0 {
-		if projected_tokens > rolling_token_budget {
-			return governance_error_response(
-				client,
-				"Rolling token governance budget exceeded.",
-				{
-					"budget_type": "rolling_tokens",
-					"used_tokens": tokens_used,
-					"request_tokens": request_tokens,
-					"projected_tokens": projected_tokens,
-					"rolling_token_budget_tokens": rolling_token_budget
-				}
-			)
-		}
-	}
-
-	cost_used := load_governance_cost_usage(client, resolved_options)
-	request_cost_cents := 0.0
-	if cost_per_1k_tokens_cents > 0 {
-		request_cost_cents := (request_tokens * cost_per_1k_tokens_cents) / 1000.0
-	}
-	projected_cost := cost_used + request_cost_cents
-	if rolling_cost_budget_cents > 0 {
-		if projected_cost > rolling_cost_budget_cents {
-			return governance_error_response(
-				client,
-				"Rolling cost governance budget exceeded.",
-				{
-					"budget_type": "rolling_cost",
-					"used_cost_cents": cost_used,
-					"request_cost_cents": request_cost_cents,
-					"projected_cost_cents": projected_cost,
-					"rolling_cost_budget_cents": rolling_cost_budget_cents
-				}
-			)
-		}
-	}
-
-	persist_governance_token_usage(client, resolved_options, projected_tokens)
-	persist_governance_cost_usage(client, resolved_options, projected_cost)
-	return result
+	return apply_usage_governance(client, result, estimated_tokens, resolved_options)
 }
 
 func finalize_embeddings_result(result, start_count, complete_count, retry_count) {
@@ -1730,7 +1687,7 @@ func build_driver_request_context(client, payload, options, resolved_options, op
 	}
 }
 
-func build_embeddings_request_context(client, payload, options, resolved_options) { return build_driver_request_context(client, payload, options, resolved_options, "embeddings", [], null) }
+func build_embeddings_request_context(client, payload, options, resolved_options) { return build_driver_request_context(client, payload, options, resolved_options, "embeddings", [], dict_get_or(payload, "input", null)) }
 
 func semantic_chat_result(client, status_code, value) {
 	if type(value) != "dict" || !dict_get_or(value, "ok", false) || type(dict_get_or(value, "output_text", null)) != "string" || type(dict_get_or(value, "tool_calls", null)) != "array" || type(dict_get_or(value, "usage", null)) != "dict" { return standard_error_response_impl(client, "invalid_response", "Provider driver returned a malformed chat semantic result.", status_code, null, false) }
@@ -3025,8 +2982,8 @@ func execute_request_once(client, messages, options, resolved_options, payload, 
 					decoded := driver_hook(client, "decode_stream", {"status_code": status_code, "response": response, "body_text": body_text, "chunks": stream_chunks, "fallback_model": payload["model"]})
 					result := null
 					if decoded["ok"] { result = semantic_chat_result(client, status_code, decoded["value"]) } else { result = standard_error_response_impl(client, "invalid_response", decoded["error"], status_code, null, false) }
-					result = enforce_structured_output_contract(client, result, resolved_options)
 					result = apply_governance_post_response(client, result, messages, payload, resolved_options)
+					result = enforce_structured_output_contract(client, result, resolved_options)
 					return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
 				}
 				if type(stream_chunks) == "array" {
@@ -3037,8 +2994,8 @@ func execute_request_once(client, messages, options, resolved_options, payload, 
 				}
 				if len(stream_events) > 0 {
 					result := normalize_stream_success_response(client, status_code, stream_events, payload["model"])
-					result := enforce_structured_output_contract(client, result, resolved_options)
 					result := apply_governance_post_response(client, result, messages, payload, resolved_options)
+					result := enforce_structured_output_contract(client, result, resolved_options)
 					return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
 				}
 			}
@@ -3072,8 +3029,8 @@ func execute_request_once(client, messages, options, resolved_options, payload, 
 				decoded := driver_hook(client, "decode_chat", {"status_code": status_code, "data": data, "body_text": body_text, "fallback_model": payload["model"]})
 				if decoded["ok"] { result = semantic_chat_result(client, status_code, decoded["value"]) } else { result = standard_error_response_impl(client, "invalid_response", decoded["error"], status_code, null, false) }
 			}
-			result := enforce_structured_output_contract(client, result, resolved_options)
 			result := apply_governance_post_response(client, result, messages, payload, resolved_options)
+			result := enforce_structured_output_contract(client, result, resolved_options)
 			return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
 		}
 		case Err(error): {
@@ -3230,8 +3187,8 @@ func chat_completion_impl(client, messages, options) {
 			return standard_error_response_impl(client, "unsupported_feature", "Provider does not support JSON/structured output mode. Remove structured_output_schema/response_format or use a json_mode-capable provider.", 0, null, false)
 		}
 		fixture_result := fixture_response_impl(client, fixture_payload)
-		fixture_result := enforce_structured_output_contract(client, fixture_result, resolved_options)
-		return apply_governance_post_response(client, fixture_result, messages, fixture_payload, resolved_options)
+		fixture_result := apply_governance_post_response(client, fixture_result, messages, fixture_payload, resolved_options)
+		return enforce_structured_output_contract(client, fixture_result, resolved_options)
 	}
 
 	missing_key := false
@@ -3379,10 +3336,16 @@ func chat_completion_impl(client, messages, options) {
 	prepared_payload := build_chat_payload_with_resolved(client, messages, options, resolved_options)
 	prepared_budget_error := enforce_request_budgets(client, messages, prepared_payload, resolved_options)
 	request_context := build_chat_request_context(client, prepared_payload, options, resolved_options)
-	if has_key(request_context, "error") { return request_context["error"] }
+	if has_key(request_context, "error") { return finalize_chat_completion_result(client, request_context["error"], 0, 0, 0) }
 
 	attempt := 0
 	while attempt <= max_retries {
+		if attempt > 0 {
+			prepared_budget_error = enforce_governance_preflight(client, messages, prepared_payload, resolved_options)
+			if type(prepared_budget_error) == "dict" {
+				return finalize_chat_completion_result(client, prepared_budget_error, start_count, complete_count, retry_count)
+			}
+		}
 		result := execute_request_once(client, messages, options, resolved_options, prepared_payload, prepared_budget_error, attempt, deadline_ms, trace_id, request_context)
 		attempt_observability := dict_get_or(result, "observability", {})
 		start_count := start_count + dict_get_or(attempt_observability, "start_count", 0)
