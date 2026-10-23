@@ -96,7 +96,7 @@ Dimensions/tags:
 Use the telemetry bridge example:
 
 ```bash
-./kujo run examples/telemetry_bridge.kujo --interpreter
+./kujo run examples/telemetry_bridge.kujo
 ```
 
 The example emits OpenTelemetry-style JSON payloads for start, retry, and completion hook events and demonstrates retry behavior with an injected flaky transport.

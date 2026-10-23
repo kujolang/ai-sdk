@@ -35,7 +35,7 @@ artifacts = []
 
 [scripts]
 test = "./kujo test-run tests/sdk_contract_tests.kujo"
-stress = "./kujo run scripts/stress_harness.kujo --interpreter"
+stress = "./kujo run scripts/stress_harness.kujo"
 
 [package.exports]
 core = "src/ai_sdk.kujo"

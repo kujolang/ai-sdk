@@ -120,7 +120,7 @@ Validation:
 ./kujo test-run tests/reliability_failure_modes_tests.kujo
 ./kujo test-run tests/parser_fuzz_smoke_tests.kujo
 ./kujo test-run tests/feature_smoke_tests.kujo
-./kujo run examples/production_profile.kujo --interpreter
+./kujo run examples/production_profile.kujo
 ```
 
 ## Escalation Criteria
