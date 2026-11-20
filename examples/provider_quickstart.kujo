@@ -1,3 +1,4 @@
+from provider_setup import provider_setup
 from provider_registry import list_providers, inspect_provider, configure_provider
 from provider_operations import discover_provider_models, rerank, jina_read, lm_studio_models, minimax_speech
 from ai_sdk import create_client, create_message, chat_completion, embeddings
@@ -13,8 +14,14 @@ if len(arguments) == 2 && arguments[1] == "inspect" {
     print(to_json(record))
     exit(0)
 }
+if len(arguments) == 2 && arguments[1] == "setup" {
+    setup := provider_setup(arguments[0])
+    print(to_json(setup))
+    if !setup["ok"] { exit(2) }
+    exit(0)
+}
 if len(arguments) != 3 {
-    print("Usage: list | <provider> inspect | <provider> <models|chat|stream|cancel|schema|tools|embed|rerank|reader|studio-models|speech> <model>")
+    print("Usage: list | <provider> inspect|setup | <provider> <models|chat|stream|cancel|schema|tools|embed|rerank|reader|studio-models|speech> <model>")
     exit(2)
 }
 

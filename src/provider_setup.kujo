@@ -1,0 +1,38 @@
+from provider_registry import inspect_provider
+
+export func provider_setup(id) {
+    provider := inspect_provider(id)
+    if provider == null { return {"ok": false, "error": "Unknown SDK provider ID."} }
+    binding := provider["setup"]
+    mode := binding["mode"]
+    imports := "from provider_registry import configure_provider\n"
+    binding_options := "{}"
+    commands := []
+    if mode != "sdk_preset" {
+        imports = imports + "from " + binding["module"] + " import " + binding["factory"] + "\n"
+        binding_options = "{\"package_factory\": " + binding["factory"] + "}"
+        commands = [
+            "kujo run \"$KENNEL_SCRIPT\" -- add " + binding["source"] + " --alias " + binding["alias"],
+            "kujo run \"$KENNEL_SCRIPT\" -- install"
+        ]
+    }
+    if mode != "native_client" { imports = imports + "from ai_sdk import create_client, create_message, chat_completion, embeddings\n" }
+    code := imports + "\nmodel := \"YOUR_MODEL_ID\"\n"
+    code = code + "configured := configure_provider(\"" + id + "\", model, " + binding_options + ")\n"
+    code = code + "if !configured[\"ok\"] { print(configured[\"error\"]); exit(1) }\n"
+    if mode == "native_client" {
+        code = code + "client := configured[\"client\"]\n"
+        code = code + "# Pass client to a native operation from the package.\n"
+        code = code + "print(configured[\"record\"][\"setup\"][\"operations\"])\n"
+    } else {
+        code = code + "client := create_client(configured[\"provider\"], null)\n"
+        if id == "jina" || id == "voyage" {
+            code = code + "result := embeddings(client, [\"hello\"], {\"max_retries\": 0})\n"
+            code = code + "if !result[\"ok\"] { print(result[\"error\"][\"code\"]); exit(1) }\nprint(result[\"embeddings\"])\n"
+        } else {
+            code = code + "result := chat_completion(client, [create_message(\"user\", \"Say hello.\")], {\"max_retries\": 0})\n"
+            code = code + "if !result[\"ok\"] { print(result[\"error\"][\"code\"]); exit(1) }\nprint(result[\"output_text\"])\n"
+        }
+    }
+    return {"ok": true, "id": id, "mode": mode, "binding": binding, "install": commands, "starter": code, "documentation_url": provider["documentation_url"]}
+}

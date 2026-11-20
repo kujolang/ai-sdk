@@ -1,0 +1,144 @@
+# Install or unpack the pinned standalone packages under one module root.
+# See docs/PROVIDER_SETUP.md. All requests below use a fixture transport.
+from provider_registry import configure_provider
+from ai_sdk import create_client, chat_completion, create_message
+from ollama.src.provider import ollama_provider
+from anthropic.src.provider import anthropic_provider
+from gemini.src.provider import gemini_provider
+from openai.src.provider import openai_provider
+from openrouter.src.provider import openrouter_provider
+from xai.src.provider import xai_provider
+from groq.src.provider import groq_provider
+from together.src.provider import together_provider
+from fireworks.src.provider import fireworks_provider
+from mistral.src.provider import mistral_provider
+from cerebras.src.provider import cerebras_provider
+from deepinfra.src.provider import deepinfra_provider
+from deepseek.src.provider import deepseek_provider
+from cloudflare_ai.src.provider import cloudflare_ai_provider
+from huggingface.src.provider import huggingface_provider
+from cohere.src.provider import cohere_provider
+from nvidia_nim.src.provider import nvidia_nim_provider
+from perplexity.src.provider import perplexity_provider
+from zai.src.provider import zai_provider
+from baseten.src.provider import baseten_provider
+
+
+func must(condition, message) {
+    if !condition { print(message); exit(1) }
+}
+
+text := "normalized package reply"
+reply := {
+    "message": {"content": text}, "content": [{"type": "text", "text": text}],
+    "candidates": [{"content": {"parts": [{"text": text}]}}],
+    "output_text": text, "text": text, "choices": [{"message": {"content": text}}]
+}
+options := {"account_id": "fixture-account"}
+expected_credential := "fixture-provider-key"
+factories := {
+    "ollama": ollama_provider,
+    "anthropic": anthropic_provider,
+    "gemini": gemini_provider,
+    "openai": openai_provider,
+    "openrouter": openrouter_provider,
+    "xai": xai_provider,
+    "groq": groq_provider,
+    "together": together_provider,
+    "fireworks": fireworks_provider,
+    "mistral": mistral_provider,
+    "cerebras": cerebras_provider,
+    "deepinfra": deepinfra_provider,
+    "deepseek": deepseek_provider,
+    "cloudflare-ai": cloudflare_ai_provider,
+    "huggingface": huggingface_provider,
+    "cohere": cohere_provider,
+    "nvidia-nim": nvidia_nim_provider,
+    "perplexity": perplexity_provider,
+    "zai": zai_provider,
+    "baseten": baseten_provider
+}
+
+for id in keys(factories) {
+    configured := configure_provider(id, "fixture-model", {"package_factory": factories[id], "package_options": options})
+    must(configured["ok"], id + " did not configure")
+    caller := create_client(configured["provider"], expected_credential)
+    response := chat_completion(caller, [create_message("user", "hello")], {
+        "max_retries": 0, "transport": func(url, request) {
+            must(request["redirects"] == "none", id + " did not protect redirects")
+            transmitted := contains(to_json(request["_headers"]), expected_credential) != 0
+            must(transmitted == (id != "ollama"), id + " used an unexpected credential policy")
+            must(contains(url, "fixture-model") != 0 || contains(request["_body"], "fixture-model") != 0, id + " did not apply model selection")
+            return Ok({"_status": 200, "_body": to_json(reply)})
+        }
+    })
+    must(response["ok"], id + " fixture request failed")
+    must(response["output_text"] == text && response["provider"] == id, id + " returned the wrong normalized response")
+}
+
+if true {
+    from replicate.src.replicate import create_client, create_prediction
+    package_options := {"token": "replicate-fixture"}
+    package_options["transport"] = func(url, request) {
+        must(contains(url, "/v1/predictions") != 0, "replicate request used the wrong route")
+        return Ok({"_status": 200, "_body": "{\"fixture\":true}"})
+    }
+    setup := configure_provider("replicate", "fixture-model", {"package_factory": create_client, "package_options": package_options})
+    must(setup["ok"] && setup["kind"] == "native", "replicate native setup failed")
+    result := create_prediction(setup["client"], {"input": {}})
+    must(result["ok"] && result["data"]["fixture"], "replicate native operation failed")
+}
+
+if true {
+    from bedrock.src.bedrock import create_client, converse
+    package_options := {"region": "us-east-1", "authorization": "signed-fixture"}
+    package_options["transport"] = func(url, request) {
+        must(contains(url, "/model/fixture-model/converse") != 0, "bedrock request used the wrong route")
+        return Ok({"_status": 200, "_body": "{\"fixture\":true}"})
+    }
+    setup := configure_provider("bedrock", "fixture-model", {"package_factory": create_client, "package_options": package_options})
+    must(setup["ok"] && setup["kind"] == "native", "bedrock native setup failed")
+    result := converse(setup["client"], {"messages": []})
+    must(result["ok"] && result["data"]["fixture"], "bedrock native operation failed")
+}
+
+if true {
+    from azure_ai.src.azure_ai import create_client, chat
+    package_options := {"endpoint": "https://example.openai.azure.com", "api_key": "azure-fixture"}
+    package_options["transport"] = func(url, request) {
+        must(contains(url, "/openai/deployments/fixture-model/chat/completions") != 0, "azure-ai request used the wrong route")
+        return Ok({"_status": 200, "_body": "{\"fixture\":true}"})
+    }
+    setup := configure_provider("azure-ai", "fixture-model", {"package_factory": create_client, "package_options": package_options})
+    must(setup["ok"] && setup["kind"] == "native", "azure-ai native setup failed")
+    result := chat(setup["client"], {"messages": []})
+    must(result["ok"] && result["data"]["fixture"], "azure-ai native operation failed")
+}
+
+if true {
+    from vertex_ai.src.vertex_ai import create_client, generate_content
+    package_options := {"project": "fixture-project", "location": "us-central1", "access_token": "token-fixture"}
+    package_options["transport"] = func(url, request) {
+        must(contains(url, "/publishers/google/models/fixture-model:generateContent") != 0, "vertex-ai request used the wrong route")
+        return Ok({"_status": 200, "_body": "{\"fixture\":true}"})
+    }
+    setup := configure_provider("vertex-ai", "fixture-model", {"package_factory": create_client, "package_options": package_options})
+    must(setup["ok"] && setup["kind"] == "native", "vertex-ai native setup failed")
+    result := generate_content(setup["client"], {"model": "fixture-model", "contents": []})
+    must(result["ok"] && result["data"]["fixture"], "vertex-ai native operation failed")
+}
+
+if true {
+    from fal.src.fal import create_client, submit
+    package_options := {"key": "fal-fixture"}
+    package_options["transport"] = func(url, request) {
+        must(contains(url, "/fixture-model") != 0, "fal request used the wrong route")
+        return Ok({"_status": 200, "_body": "{\"fixture\":true}"})
+    }
+    setup := configure_provider("fal", "fixture-model", {"package_factory": create_client, "package_options": package_options})
+    must(setup["ok"] && setup["kind"] == "native", "fal native setup failed")
+    result := submit(setup["client"], {"input": {}})
+    must(result["ok"] && result["data"]["fixture"], "fal native operation failed")
+}
+
+print("All 25 standalone packages configured and invoked with fixture transports.")

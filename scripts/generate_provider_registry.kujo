@@ -6,6 +6,18 @@ for provider in manifest["providers"] {
     id := provider["id"]
     if has_key(seen, id) { print("Duplicate provider " + id); exit(1) }
     seen[id] = true
+    setup := provider["setup"]
+    mode := setup["mode"]
+    if mode == "sdk_preset" {
+        if has_key(provider, "base_url") == 0 { print("Missing endpoint for " + id); exit(1) }
+    } else {
+        if mode != "sdk_driver" && mode != "native_client" { print("Invalid setup mode for " + id); exit(1) }
+        for field in ["alias", "source", "module", "factory", "model_field"] {
+            if has_key(setup, field) == 0 || type(setup[field]) != "string" || setup[field] == "" {
+                print("Missing package " + field + " for " + id); exit(1)
+            }
+        }
+    }
     evidence := {}
     for row in provider["live_evidence"] {
         if row["result"] == "passed" && row["date"] == provider["verification_date"] {

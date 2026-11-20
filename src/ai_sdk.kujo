@@ -211,7 +211,7 @@ func create_client_impl(provider, api_key_override) {
 	if type(api_key) == "null" {
 		api_key := ""
 	}
-    if dict_get_or(provider, "registered_provider", false) && type(api_key) != "string" {
+    if (dict_get_or(provider, "registered_provider", false) || dict_get_or(provider, "package_provider", false)) && type(api_key) != "string" {
         config_error = "Provider API key must be a string."
         api_key = ""
     }
@@ -425,6 +425,10 @@ func resolve_chat_options(client, options) {
 	resolved["endpoint_allowlist_enabled"] := resolve_option_with_default(options, "endpoint_allowlist_enabled", resolved["endpoint_allowlist_enabled"])
 	resolved["endpoint_allowlist_hosts"] := resolve_option_with_default(options, "endpoint_allowlist_hosts", resolved["endpoint_allowlist_hosts"])
 	resolved["redirects"] := resolve_option_with_default(options, "redirects", resolved["redirects"])
+    if dict_get_or(client["provider"], "package_provider", false) {
+        resolved["redirects"] = "none"
+        resolved["allow_unsafe_header_override"] = false
+    }
     if dict_get_or(client["provider"], "registered_provider", false) {
         resolved["provider_evidence"] = {
             "provider": client["provider"]["name"],
@@ -1848,12 +1852,22 @@ func contains_ci(values, candidate) {
 	return false
 }
 
+func driver_origin(url) {
+    if type(url) != "string" { return "" }
+    parts := split(url, "/")
+    if len(parts) < 3 { return "" }
+    return lower(parts[0] + "//" + parts[2])
+}
+
 func validate_driver_descriptor(client, descriptor, operation) {
 	if type(descriptor) != "dict" { return {"ok": false, "code": "config_error", "message": "Provider driver request descriptor must be a dict."} }
 	url := dict_get_or(descriptor, "url", "")
 	if type(url) != "string" || url == "" { return {"ok": false, "code": "config_error", "message": "Provider driver request descriptor requires a URL."} }
 	if contains(url, "@") || contains(url, "?") || contains(url, "#") { return {"ok": false, "code": "endpoint_policy_violation", "message": "Provider driver URL contains forbidden credentials, query, or fragment data."} }
-	provider := client["provider"]
+    provider := client["provider"]
+    if dict_get_or(provider, "package_provider", false) && driver_origin(url) != driver_origin(provider["base_url"]) {
+        return {"ok": false, "code": "endpoint_policy_violation", "message": "Provider driver must use the configured scheme, host, and port."}
+    }
 	if provider_host_from_base_url(url) != provider_host_from_base_url(provider["base_url"]) { return {"ok": false, "code": "endpoint_policy_violation", "message": "Provider driver URL host must match configured provider host."} }
 	secure := starts_with(lower(url), "https://")
 	local_http := dict_get_or(provider, "allow_insecure_localhost", false) && starts_with(lower(url), "http://") && (provider_host_from_base_url(url) == "localhost" || provider_host_from_base_url(url) == "127.0.0.1")
@@ -1885,7 +1899,17 @@ func build_driver_request_context(client, payload, options, resolved_options, op
 	descriptor := encoded["value"]
 	checked := validate_driver_descriptor(client, descriptor, operation)
 	if !checked["ok"] { return {"error": standard_error_response_impl(client, checked["code"], checked["message"], 0, null, false)} }
-	headers := descriptor["headers"]
+    headers := descriptor["headers"]
+    if dict_get_or(client["provider"], "package_provider", false) {
+        mode := dict_get_or(dict_get_or(client["driver_description"], "auth", {}), "mode", "")
+        credential := client["api_key"]
+        if mode == "bearer" && type(credential) == "string" && credential != "" && !contains_ci(keys(headers), "Authorization") {
+            if header_entry_has_injection_risk("Authorization", credential) {
+                return {"error": standard_error_response_impl(client, "config_error", "Invalid provider credential header.", 0, null, false)}
+            }
+            headers["Authorization"] = "Bearer " + credential
+        }
+    }
 	extra_headers := null
 	allow_protected_header_override := false
 	if type(options) == "dict" {
@@ -1895,7 +1919,7 @@ func build_driver_request_context(client, payload, options, resolved_options, op
     if !allow_protected_header_override && type(extra_headers) == "dict" {
         filtered := {}
         blocked := descriptor["protected_headers"]
-        if dict_get_or(client["provider"], "registered_provider", false) {
+        if dict_get_or(client["provider"], "registered_provider", false) || dict_get_or(client["provider"], "package_provider", false) {
             blocked = [...blocked, "Host", "Proxy-Authorization", "Content-Length", "Transfer-Encoding", "Connection"]
         }
         for name in keys(extra_headers) {

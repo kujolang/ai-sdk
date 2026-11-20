@@ -42,6 +42,7 @@ core = "src/ai_sdk.kujo"
 providers = "src/providers.kujo"
 driver = "src/provider_driver.kujo"
 registry = "src/provider_registry.kujo"
+provider_setup = "src/provider_setup.kujo"
 provider_operations = "src/provider_operations.kujo"
 openai_compatible_driver = "src/openai_compatible_driver.kujo"
 

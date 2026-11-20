@@ -1,20 +1,99 @@
 # Configure a Kujo provider
 
-Use Kujo 1.9.0 for the setup and connectivity checks below. From the AI SDK
-checkout, set `KUJO_MODULE_PATH="$PWD/src"` so the examples can import SDK modules.
-The published SDK 1.2.0 predates these presets.
+Use the provider registry in this AI SDK source checkout with Kujo 1.9.0.
+The published SDK 1.2.0 predates the registry.
+
+From your application directory, point Kujo at the SDK checkout and your
+project's installed packages:
 
 ```sh
-export KUJO_MODULE_PATH="$PWD/src"
-kujo run examples/provider_quickstart.kujo -- list
-kujo run examples/provider_quickstart.kujo -- llama-cpp inspect
-kujo run examples/provider_quickstart.kujo -- llama-cpp models YOUR_MODEL_ID
-kujo run examples/provider_quickstart.kujo -- llama-cpp chat YOUR_MODEL_ID
+export AI_SDK_ROOT=/path/to/ai-sdk
+export KENNEL_SCRIPT=/path/to/kennel/kennel.kujo
+export KUJO_MODULE_PATH="$AI_SDK_ROOT/src:$PWD/kennel_packages"
+kujo run "$AI_SDK_ROOT/examples/provider_quickstart.kujo" -- list
+kujo run "$AI_SDK_ROOT/examples/provider_quickstart.kujo" -- anthropic inspect
+kujo run "$AI_SDK_ROOT/examples/provider_quickstart.kujo" -- anthropic setup
 ```
 
-List and inspect work offline. The other commands make an actual request and
-print a short JSON outcome. Use a model identifier from your account or server.
-For the existing standalone packages, inspect lists their repository and API docs.
+`setup` returns the pinned install commands, the package import if needed,
+and starter code. Set the model from your deployment or account. For a
+package-backed integration, run the returned Kennel commands in your project
+directory. If the project has no Kennel manifest yet, initialize it first:
+
+```sh
+kujo run "$KENNEL_SCRIPT" -- init --name my-app
+kujo run "$AI_SDK_ROOT/examples/provider_quickstart.kujo" -- anthropic setup | jq -r '.install[]'
+kujo run "$AI_SDK_ROOT/examples/provider_quickstart.kujo" -- anthropic setup | jq -r '.starter' > first_provider.kujo
+```
+
+## Use the common configuration call
+
+The built-in presets take `configure_provider(id, model, {})`. A packaged
+driver adds one import and supplies its factory:
+
+```kujo
+from anthropic.src.provider import anthropic_provider
+from provider_registry import configure_provider
+from ai_sdk import create_client, create_message, chat_completion
+
+configured := configure_provider("anthropic", "YOUR_MODEL_ID", {"package_factory": anthropic_provider})
+if !configured["ok"] { print(configured["error"]); exit(1) }
+client := create_client(configured["provider"], null)
+result := chat_completion(client, [create_message("user", "Say hello.")], {"max_retries": 0})
+if !result["ok"] { print(result["error"]["code"]); exit(1) }
+print(result["output_text"])
+```
+
+The 20 packaged SDK drivers reuse their protocol-specific encoders and
+decoders. Pass provider-specific settings through `package_options`, such as
+Cloudflare's `account_id` or Ollama's `host`. Check
+`require_provider_capabilities(configured["provider"], ["embeddings"])`
+before choosing an operation. Use package-native APIs for features absent
+from its normalized driver. The registry reports `kind: "sdk"` for both the
+built-in presets and the package drivers.
+
+## Use a native client
+
+The same configuration call returns `kind: "native"` and `client` for these
+packages. Pass the package's `create_client` as `package_factory` and use
+`package_options` for its deployment and credential settings. The setup
+command shows the qualified package import.
+
+| Provider | Model argument to `configure_provider` | Package settings | Operations |
+| --- | --- | --- | --- |
+| Amazon Bedrock | Bedrock model ID | Region and request-specific SigV4 material | `converse`, `invoke_model` |
+| Azure AI | Azure deployment name | Endpoint, API version and key or access token | `chat` |
+| Vertex AI | Vertex model ID | Project, location and Google access token | `generate_content`, `predict` |
+| Replicate | Prediction version ID | `REPLICATE_API_TOKEN` or explicit token | `create_prediction`, `get_prediction`, `cancel_prediction` |
+| fal.ai | Queue model path | `FAL_KEY` or explicit key | `submit`, `status`, `result`, `cancel` |
+
+For example, configure Replicate and submit an explicit prediction:
+
+```kujo
+from replicate.src.replicate import create_client, create_prediction
+from provider_registry import configure_provider
+
+configured := configure_provider("replicate", "YOUR_VERSION_ID", {"package_factory": create_client})
+if !configured["ok"] { print(configured["error"]); exit(1) }
+prediction := create_prediction(configured["client"], {"input": {"prompt": "Say hello."}})
+if !prediction["ok"] { print("Prediction request failed."); exit(1) }
+print(prediction["data"]["id"])
+```
+
+For Vertex `generate_content`, pass `configured["model"]` as the request's
+`model` field. For fal.ai, pass the configured model and returned request ID
+to the status, result, or cancel operation. Keep each native client in
+memory and log only selected response fields. The native packages own
+their HTTP and authorization behavior.
+
+## Built-in preset defaults
+
+Use the same provider quickstart to call a built-in preset directly:
+
+```sh
+kujo run "$AI_SDK_ROOT/examples/provider_quickstart.kujo" -- llama-cpp models YOUR_MODEL_ID
+kujo run "$AI_SDK_ROOT/examples/provider_quickstart.kujo" -- llama-cpp chat YOUR_MODEL_ID
+```
 
 | Provider ID | Default base URL | Credential | Connectivity and optional operations |
 | --- | --- | --- | --- |
@@ -105,3 +184,13 @@ Run `bash scripts/verify_provider_live.sh` with only the model variables and
 credentials you want exercised. Set `KUJO_BIN` for a pinned runtime. Missing
 prerequisites produce `Not Tested` rows. Fixture contract tests use
 `kujo test-run tests/provider_ecosystem_tests.kujo`.
+
+
+Run the package consumer test with the 25 pinned package trees on one module
+root. Name each directory after its `setup.alias` from the certification
+manifest. Use the matching tag recorded in `setup.source`. The test uses
+fixture transports for every request:
+
+```sh
+KUJO_MODULE_PATH="$PWD/src:/path/to/package-root" kujo run tests/provider_package_consumer.kujo
+```

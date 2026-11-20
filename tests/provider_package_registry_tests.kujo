@@ -1,0 +1,94 @@
+test_setup {
+    from src.provider_registry import configure_provider, list_providers, require_provider_capabilities, inspect_provider
+    from src.provider_setup import provider_setup
+    from src.ai_sdk import create_client, chat_completion
+}
+
+test "every listed provider has a setup guide and copyable starter" {
+    modes := {"sdk_preset": 0, "sdk_driver": 0, "native_client": 0}
+    for record in list_providers() {
+        mode := record["setup"]["mode"]
+        modes[mode] = modes[mode] + 1
+        setup := provider_setup(record["id"])
+        assert_true(setup["ok"])
+        assert_equal(setup["mode"], mode)
+        assert_true(contains(setup["starter"], "configure_provider") != 0)
+        if mode == "sdk_preset" {
+            assert_equal(setup["install"], [])
+        } else {
+            assert_true(contains(setup["install"][0], record["setup"]["source"]) != 0)
+            assert_true(contains(setup["starter"], record["setup"]["module"]) != 0)
+            missing := configure_provider(record["id"], "fixture-model", {})
+            assert_equal(missing["ok"], false)
+            assert_equal(missing["setup"]["mode"], mode)
+        }
+    }
+    assert_equal(modes, {"sdk_preset": 10, "sdk_driver": 20, "native_client": 5})
+}
+
+test "package driver setup preserves wire decoding, protects authentication and caps declared features" {
+    factory := func(options) {
+        origin := "https://router.huggingface.co"
+        if has_key(options, "alternate_port") { origin = origin + ":8080" }
+        return {
+            "name": "legacy-name",
+            "base_url": "https://router.huggingface.co/v1",
+            "default_model": options["model"],
+            "api_key_env": "HF_TOKEN",
+            "capabilities": {"streaming": true, "embeddings": true},
+            "driver": {
+                "id": "huggingface-openai-compatible", "contract": "ai-sdk-provider-driver", "version": "1.0.0",
+                "describe": func(p) { return {"auth": {"mode": "bearer"}} },
+                "validate": func(p) { return {"ok": true} },
+                "encode_chat": func(ctx) {
+                    return {"url": origin + "/v1/chat/completions", "method": "POST",
+                        "headers": {"Content-Type": "application/json"}, "protected_headers": [],
+                        "body": to_json({"model": ctx["payload"]["model"]}), "stream_mode": false}
+                },
+                "decode_chat": func(ctx) { return {"ok": true, "output_text": ctx["data"]["text"], "model": ctx["fallback_model"], "tool_calls": [], "usage": {}} },
+                "decode_error": func(ctx) { return {"ok": false, "matched": false} }
+            }
+        }
+    }
+    setup := configure_provider("huggingface", "chosen-model", {"package_factory": factory})
+    assert_true(setup["ok"])
+    assert_equal(setup["kind"], "sdk")
+    assert_equal(require_provider_capabilities(setup["provider"], ["chat", "streaming", "embeddings"])["missing"], ["streaming", "embeddings"])
+    assert_equal(configure_provider("openai", "chosen-model", {"package_factory": factory})["ok"], false)
+    client := create_client(setup["provider"], "fixture-key")
+    result := chat_completion(client, [], {"redirects": "follow", "allow_unsafe_header_override": true, "headers": {"Authorization": "override", "Host": "other.invalid"},
+        "transport": func(url, request) {
+            assert_equal(request["redirects"], "none")
+            assert_equal(request["_headers"]["Authorization"], "Bearer fixture-key")
+            assert_equal(has_key(request["_headers"], "Host"), 0)
+            assert_equal(parse_json(request["_body"])["model"], "chosen-model")
+            return Ok({"_status": 200, "_body": "{\"text\":\"package decoder\"}"})
+        }})
+    assert_true(result["ok"])
+    assert_equal(result["provider"], "huggingface")
+    assert_equal(result["output_text"], "package decoder")
+    bad := configure_provider("huggingface", "chosen-model", {"package_factory": factory, "package_options": {"alternate_port": true}})
+    failure := chat_completion(create_client(bad["provider"], "fixture-key"), [], {"transport": func(url, request) { throw "unexpected transport" }})
+    assert_equal(failure["error"]["code"], "endpoint_policy_violation")
+}
+
+test "native setup maps the model field and keeps native operations explicit" {
+    for pair in [["bedrock", "model_id"], ["azure-ai", "deployment"], ["vertex-ai", "model"], ["replicate", "model"], ["fal", "model"]] {
+        native_fields := inspect_provider(pair[0])["setup"]["client_fields"]
+        setup := configure_provider(pair[0], "chosen", {"package_options": {"fixture_flag": true}, "package_factory": func(options) {
+            client := {"selected": options[pair[1]], "flag": options["fixture_flag"]}
+            for field in native_fields { client[field] = "fixture" }
+            return client
+        }})
+        assert_true(setup["ok"])
+        assert_equal(setup["kind"], "native")
+        assert_equal(setup["model"], "chosen")
+        assert_equal(setup["client"]["selected"], "chosen")
+        assert_true(setup["client"]["flag"])
+        assert_equal(has_key(setup, "provider"), 0)
+        assert_true(len(setup["record"]["setup"]["operations"]) > 0)
+    }
+    bad := configure_provider("replicate", "chosen", {"package_factory": func(options) { throw "must not leak" }})
+    assert_false(bad["ok"])
+    assert_equal(contains(bad["error"], "must not leak"), 0)
+}

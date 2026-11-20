@@ -74,6 +74,7 @@ run_test_suite_with_floor tests/transport_policy_tests.kujo 3
 run_test_suite_with_floor tests/provider_driver_contract_tests.kujo 5
 run_test_suite_with_floor tests/openai_compatible_driver_regression_tests.kujo 4
 run_test_suite_with_floor tests/provider_ecosystem_tests.kujo 9
+run_test_suite_with_floor tests/provider_package_registry_tests.kujo 3
 run_runtime_command_with_warning_gate "provider certification projection" run scripts/generate_provider_registry.kujo -- --check
 run_test_suite_with_floor tests/external_driver_fixture_tests.kujo 5
 run_test_suite_with_floor tests/provider_driver_security_tests.kujo 8

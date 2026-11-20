@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Unified setup for 35 cataloged integrations. The 20 packaged SDK drivers use their existing protocols through `configure_provider`. Five standalone cloud and media packages return native clients from the same entry point. The quickstart emits pinned installation commands and starter code for each provider.
+
 - Added a capability and certification registry for 35 distinct Kujo integrations, including ten configurable SDK presets.
 - Added LM Studio model discovery and management, normalized Voyage and Jina text retrieval, Jina Reader, and MiniMax synchronous speech.
 - Added separate live checks and evidence for several llama.cpp and Ollama capabilities. The certification manifest records untested services and features.

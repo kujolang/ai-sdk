@@ -10,7 +10,7 @@ Use the OpenAI, OpenRouter, or DeepSeek presets, a custom OpenAI-compatible endp
 
 ## Provider registry
 
-Inspect provider capabilities, configure a local server or a hosted endpoint, and use the shared chat and retrieval contracts. See [provider setup](docs/PROVIDER_SETUP.md) and the [certification manifest](providers/certification.json) for individual capability evidence and live verification status.
+Run `examples/provider_quickstart.kujo -- PROVIDER setup` to get install steps and starter code for any registered integration. Use `configure_provider` for built-in presets, installed package drivers, and native cloud or job clients. See [provider setup](docs/PROVIDER_SETUP.md) and the [certification manifest](providers/certification.json) for individual capability evidence and live verification status.
 
 ## Install
 
