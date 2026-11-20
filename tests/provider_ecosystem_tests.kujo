@@ -185,7 +185,7 @@ test "registered provider errors and attempt events omit upstream request data" 
     assert_equal(contains(to_json(result), "fixture-key"), 0)
 }
 
-test "rate-limit retry is bounded and retains the attempt count" {
+test "rate-limit response returns without retry if the provider delay exceeds the budget" {
     client := create_client(configure_provider("minimax", "model", {})["provider"], "key")
     result := chat_completion(client, [], {"max_retries": 1, "retry_delay_ms": 0, "max_retry_delay_ms": 1,
         "transport": func(url, request) {
@@ -193,5 +193,5 @@ test "rate-limit retry is bounded and retains the attempt count" {
         }})
     assert_equal(result["error"]["code"], "rate_limit")
     assert_equal(result["retry_after_ms"], 500000)
-    assert_equal(result["observability"]["retry_count"], 1)
+    assert_equal(result["observability"]["retry_count"], 0)
 }

@@ -2323,7 +2323,10 @@ func embeddings_impl(client, input_value, options) {
 
 		delay_ms := compute_retry_delay_ms(attempt, base_retry_delay_ms, max_retry_delay_ms, retry_jitter_ms)
         provider_delay := dict_get_or(result, "retry_after_ms", 0)
-        if provider_delay > delay_ms { delay_ms = min(provider_delay, max_retry_delay_ms) }
+        if retry_after_exceeds_budget(provider_delay, max_retry_delay_ms, deadline_ms) {
+            return finalize_embeddings_result(result, start_count, complete_count, retry_count)
+        }
+        if provider_delay > delay_ms { delay_ms = provider_delay }
 		retry_count := retry_count + 1
 		retry_hook := dict_get_or(resolved_options, "on_retry", null)
 		if type(retry_hook) == "function" {
@@ -2336,6 +2339,8 @@ func embeddings_impl(client, input_value, options) {
 				"status_code": dict_get_or(result, "status_code", 0),
 				"error_code": dict_get_or(err_obj, "code", "")
 			}
+            evidence := dict_get_or(resolved_options, "provider_evidence", null)
+            if type(evidence) == "dict" { event = {...event, ...evidence, "trace_id": trace_id} }
 			emit_hook_safe(retry_hook, event)
 		}
 		if deadline_ms > 0 {
@@ -2575,6 +2580,11 @@ func should_retry_result(result) {
 	}
 
 	return false
+}
+
+func retry_after_exceeds_budget(provider_delay, cap, deadline) {
+    if provider_delay <= 0 { return false }
+    return provider_delay > cap || (deadline > 0 && provider_delay >= deadline - current_timestamp())
 }
 
 func compute_retry_jitter_ms(attempt, jitter_window_ms) {
@@ -3734,7 +3744,11 @@ func chat_completion_impl(client, messages, options) {
 
 		delay_ms := compute_retry_delay_ms(attempt, base_retry_delay_ms, max_retry_delay_ms, retry_jitter_ms)
         provider_delay := dict_get_or(result, "retry_after_ms", 0)
-        if provider_delay > delay_ms { delay_ms = min(provider_delay, max_retry_delay_ms) }
+        if retry_after_exceeds_budget(provider_delay, max_retry_delay_ms, deadline_ms) {
+            persist_circuit_breaker_state_with_backend(client, resolved_options, breaker_consecutive_failures, breaker_open_until_ms)
+            return finalize_chat_completion_result(client, result, start_count, complete_count, retry_count)
+        }
+        if provider_delay > delay_ms { delay_ms = provider_delay }
 		retry_count := retry_count + 1
 		retry_hook := dict_get_or(resolved_options, "on_retry", null)
 		if type(retry_hook) == "function" {
@@ -3746,6 +3760,8 @@ func chat_completion_impl(client, messages, options) {
 				"status_code": dict_get_or(result, "status_code", 0),
 				"error_code": dict_get_or(err_obj, "code", "")
 			}
+            evidence := dict_get_or(resolved_options, "provider_evidence", null)
+            if type(evidence) == "dict" { event = {...event, ...evidence, "trace_id": trace_id} }
 			emit_hook_safe(retry_hook, event)
 		}
 		if deadline_ms > 0 {
