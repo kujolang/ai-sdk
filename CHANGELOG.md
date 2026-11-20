@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Added a capability and certification registry for 35 distinct Kujo integrations, including ten configurable SDK presets.
+- Added LM Studio model discovery and management, normalized Voyage and Jina text retrieval, Jina Reader, and MiniMax synchronous speech.
+- Added separate live checks and evidence for several llama.cpp and Ollama capabilities. The certification manifest records untested services and features.
+- Security change: provider fallback now resolves its own credential and accepts custom headers only from its own options. Set a fallback API key in the fallback's configured environment variable or its explicit `api_key` field.
+- See [provider setup](docs/PROVIDER_SETUP.md) for deployment settings, verification commands, and runtime requirements.
+
 ## 1.2.0 — 2026-10-13
 
 ### Added

@@ -8,6 +8,10 @@ Call chat and embedding models from Kujo through one response contract. AI SDK h
 
 Use the OpenAI, OpenRouter, or DeepSeek presets, a custom OpenAI-compatible endpoint, or a native provider driver. Existing provider dictionaries work without a `driver` field. Native drivers encode requests and decode responses; the SDK owns network I/O, security checks, retries, and accounting.
 
+## Provider registry
+
+Inspect provider capabilities, configure a local server or a hosted endpoint, and use the shared chat and retrieval contracts. See [provider setup](docs/PROVIDER_SETUP.md) and the [certification manifest](providers/certification.json) for individual capability evidence and live verification status.
+
 ## Install
 
 AI SDK 1.2.0 requires Kujo 1.6.0 or newer. Install with Kennel 1.1.0 or newer:

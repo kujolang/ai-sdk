@@ -5,7 +5,7 @@ func describe_impl(provider) {
 	capabilities := {}; models := []
 	if has_key(provider, "capabilities") { capabilities = provider["capabilities"] }
 	if has_key(provider, "models") { models = provider["models"] }
-	return {"id": "openai-compatible", "protocol": "openai-chat-completions", "auth": {"mode": "bearer", "allow_anonymous": false}, "capabilities": capabilities, "models": models}
+	return {"id": "openai-compatible", "protocol": "openai-chat-completions", "auth": {"mode": "bearer", "allow_anonymous": get(provider, "allow_anonymous", false)}, "capabilities": capabilities, "models": models}
 }
 
 func validate_impl(provider) {
@@ -15,14 +15,20 @@ func validate_impl(provider) {
 
 func encode_chat_impl(context) {
 	provider := context["provider"]
-	return {"url": provider["base_url"] + provider["chat_path"], "method": "POST", "headers": {"Authorization": "Bearer " + context["credential"], "Content-Type": "application/json"}, "protected_headers": ["Authorization", "Content-Type"], "body": to_json(context["payload"]), "stream_mode": context["resolved_options"]["stream"]}
+	headers := {"Content-Type": "application/json"}
+    credential := context["credential"]
+    if type(credential) == "string" && credential != "" { headers["Authorization"] = "Bearer " + credential }
+	return {"url": provider["base_url"] + provider["chat_path"], "method": "POST", "headers": headers, "protected_headers": ["Authorization", "Content-Type"], "body": to_json(context["payload"]), "stream_mode": context["resolved_options"]["stream"]}
 }
 
 func encode_embeddings_impl(context) {
 	provider := context["provider"]
 	path := "/embeddings"
 	if has_key(provider, "embeddings_path") { path = provider["embeddings_path"] }
-	return {"url": provider["base_url"] + path, "method": "POST", "headers": {"Authorization": "Bearer " + context["credential"], "Content-Type": "application/json"}, "protected_headers": ["Authorization", "Content-Type"], "body": to_json(context["payload"]), "stream_mode": false}
+	headers := {"Content-Type": "application/json"}
+    credential := context["credential"]
+    if type(credential) == "string" && credential != "" { headers["Authorization"] = "Bearer " + credential }
+	return {"url": provider["base_url"] + path, "method": "POST", "headers": headers, "protected_headers": ["Authorization", "Content-Type"], "body": to_json(context["payload"]), "stream_mode": false}
 }
 
 func get(obj,key,fallback) { if type(obj)=="dict" && has_key(obj,key) {return obj[key]}; return fallback }

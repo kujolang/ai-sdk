@@ -1,0 +1,102 @@
+from provider_registry import list_providers, inspect_provider, configure_provider
+from provider_operations import discover_provider_models, rerank, jina_read, lm_studio_models, minimax_speech
+from ai_sdk import create_client, create_message, chat_completion, embeddings
+
+arguments := args()
+if arguments == ["list"] {
+    print(to_json(list_providers()))
+    exit(0)
+}
+if len(arguments) == 2 && arguments[1] == "inspect" {
+    record := inspect_provider(arguments[0])
+    if record == null { exit(2) }
+    print(to_json(record))
+    exit(0)
+}
+if len(arguments) != 3 {
+    print("Usage: list | <provider> inspect | <provider> <models|chat|stream|cancel|schema|tools|embed|rerank|reader|studio-models|speech> <model>")
+    exit(2)
+}
+
+provider_id := arguments[0]
+operation := arguments[1]
+model := arguments[2]
+record := inspect_provider(provider_id)
+if record == null { print("Unknown provider"); exit(2) }
+config := {}
+endpoint := env("KUJO_PROVIDER_BASE_URL")
+if type(endpoint) == "string" && endpoint != "" {
+    config["base_url"] = endpoint
+    config["api_key_env"] = "KUJO_PROVIDER_API_KEY"
+}
+if operation == "schema" { config["enable_capabilities"] = ["json_schema"] }
+if operation == "tools" { config["enable_capabilities"] = ["tool_calls"] }
+if operation == "embed" { config["enable_capabilities"] = ["embeddings"] }
+configured := configure_provider(provider_id, model, config)
+if !configured["ok"] {
+    print(to_json({"ok": false, "provider": provider_id, "operation": operation, "error": configured["error"]}))
+    exit(2)
+}
+client := create_client(configured["provider"], null)
+options := {"max_retries": 0, "timeout": 45, "connect_timeout": 5, "max_tokens": 128}
+messages := [create_message("user", "Reply with the word hello.")]
+result := null
+if operation == "models" { result = discover_provider_models(client, options) }
+if operation == "studio-models" { result = lm_studio_models(client, "list", "", options) }
+if operation == "chat" { result = chat_completion(client, messages, options) }
+if operation == "stream" { result = chat_completion(client, messages, {...options, "stream": true}) }
+if operation == "cancel" {
+    result = chat_completion(client, messages, {...options, "stream": true, "on_transport_chunk": func(event) { return false }})
+    cancelled := !result["ok"] && result["error"]["code"] == "cancelled" && !result["error"]["retryable"]
+    print(to_json({"ok": cancelled, "provider": provider_id, "model": model, "operation": operation}))
+    if !cancelled { exit(1) }
+    exit(0)
+}
+if operation == "schema" {
+    schema := {"type": "object", "properties": {"word": {"type": "string", "enum": ["hello"]}}, "required": ["word"], "additionalProperties": false}
+    result = chat_completion(client, [create_message("user", "Return a JSON object with word set to hello.")], {...options,
+        "response_format": {"type": "json_schema", "json_schema": {"name": "test_response", "strict": true, "schema": schema}}})
+}
+if operation == "tools" {
+    tool := {"type": "function", "function": {"name": "lookup", "description": "Look up a city", "parameters": {
+        "type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"], "additionalProperties": false
+    }}}
+    result = chat_completion(client, [create_message("user", "Use lookup for Paris.")], {...options,
+        "tools": [tool], "tool_choice": {"type": "function", "function": {"name": "lookup"}}})
+}
+if operation == "embed" { result = embeddings(client, ["hello", "goodbye"], options) }
+if operation == "rerank" { result = rerank(client, model, "domestic cat", ["A house cat", "A distant galaxy"], {...options, "top_n": 1}) }
+if operation == "reader" { result = jina_read(client, "https://example.org/", options) }
+if operation == "speech" {
+    voice := env("KUJO_PROVIDER_VOICE")
+    result = minimax_speech(client, model, voice, "Hello.", options)
+}
+if result == null { print("Unknown operation"); exit(2) }
+if !result["ok"] {
+    print(to_json({"ok": false, "provider": provider_id, "operation": operation, "error_code": result["error"]["code"], "status_code": result["status_code"]}))
+    exit(1)
+}
+valid := true
+if operation == "chat" || operation == "stream" { valid = len(trim(result["output_text"])) > 0 }
+if operation == "tools" {
+    valid = len(result["tool_calls"]) == 1
+    if valid {
+        call := result["tool_calls"][0]["function"]
+        parsed := null
+        try { parsed = parse_json(call["arguments"]) } except err { parsed = null }
+        valid = call["name"] == "lookup" && type(parsed) == "dict" && parsed["city"] == "Paris"
+    }
+}
+if operation == "reader" { valid = contains(result["content"], "Example Domain") != 0 }
+if operation == "rerank" { valid = result["rankings"][0]["index"] == 0 }
+summary := {"ok": valid, "provider": provider_id, "model": model, "operation": operation, "status_code": result["status_code"]}
+if operation == "models" {
+    models := []
+    for item in result["models"] { models = push(models, item["id"]) }
+    summary["models"] = models
+}
+if has_key(result, "usage") {
+    summary["token_usage_available"] = result["usage"]["usage_source"] == "provider"
+}
+print(to_json(summary))
+if !valid { exit(1) }

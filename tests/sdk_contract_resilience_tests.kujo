@@ -827,6 +827,8 @@ test "provider fallback succeeds on retryable primary failure" {
 			return Err("primary timeout")
 		}
 		if starts_with(url, "https://fallback.example/v1") {
+            assert_equal(request_options["_headers"]["Authorization"], "Bearer alternate-key")
+            assert_equal(has_key(request_options["_headers"], "X-Private-Header"), 0)
 			return Ok({
 				"_status": 200,
 				"_body": "{\"id\":\"fallback-1\",\"model\":\"fallback-model\",\"choices\":[{\"message\":{\"content\":\"fallback-ok\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}"
@@ -837,9 +839,10 @@ test "provider fallback succeeds on retryable primary failure" {
 
 	result := chat_completion(client, messages, {
 		"transport": transport_with_fallback,
+        "headers": {"X-Private-Header": "primary-only"},
 		"max_retries": 0,
 		"fallback_providers": [
-			{"provider": fallback_provider}
+			{"provider": fallback_provider, "api_key": "alternate-key"}
 		]
 	})
 

@@ -1,0 +1,83 @@
+from provider_registry_data import provider_records
+from providers import custom_openai_compatible_provider_with_options
+
+func get(record, key, fallback) {
+    if type(record) == "dict" && has_key(record, key) { return record[key] }
+    return fallback
+}
+
+export list_providers := provider_records
+
+export func inspect_provider(id) {
+    for record in provider_records() {
+        if record["id"] == id { return record }
+    }
+    return null
+}
+
+export func require_provider_capabilities(provider, required) {
+    capabilities := get(provider, "capabilities", {})
+    missing := []
+    for capability in required {
+        if !get(capabilities, capability, false) { missing = push(missing, capability) }
+    }
+    return {"ok": len(missing) == 0, "missing": missing}
+}
+
+# This constructor is for trusted configuration. Deployment-dependent features
+# require explicit opt-in even when their protocol fixtures pass.
+export func configure_provider(id, model, options) {
+    record := inspect_provider(id)
+    if record == null { return {"ok": false, "error": "Unknown SDK provider ID."} }
+    if has_key(record, "base_url") == 0 {
+        return {"ok": false, "error": "Load the provider's standalone package to configure it."}
+    }
+    if type(model) != "string" || len(trim(model)) == 0 || len(model) > 512 {
+        return {"ok": false, "error": "Set an explicit provider model identifier."}
+    }
+    if type(options) != "dict" { return {"ok": false, "error": "Provider options must be a dictionary."} }
+
+    local := record["category"] == "Local"
+    base_url := get(options, "base_url", record["base_url"])
+    if !local && base_url != record["base_url"] {
+        return {"ok": false, "error": "Hosted preset credentials are scoped to the official endpoint."}
+    }
+    # Restrict this constructor to ordinary DNS/IPv4 authorities and safe paths.
+    # DNS and resolved addresses are governed by the runtime destination policy.
+    valid_url := "^https?://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?(/[A-Za-z0-9_-]+)*/?$"
+    if type(base_url) != "string" || len(base_url) > 2048 || !regex_match(base_url, valid_url) {
+        return {"ok": false, "error": "Invalid provider URL. Use HTTPS or loopback HTTP for a local preset."}
+    }
+    key_env := record["api_key_env"]
+    # A self-hosted override must explicitly select its own credential source.
+    if local && base_url != record["base_url"] { key_env = "" }
+    key_env = get(options, "api_key_env", key_env)
+    if type(key_env) != "string" { return {"ok": false, "error": "api_key_env must be a string."} }
+    provider := custom_openai_compatible_provider_with_options(base_url, key_env, model, local)
+    if provider["validation_error"] != "" { return {"ok": false, "error": provider["validation_error"]} }
+
+    enabled := get(options, "enable_capabilities", [])
+    if type(enabled) != "array" { return {"ok": false, "error": "enable_capabilities must be an array."} }
+    capabilities := {}
+    for name in ["chat", "streaming", "model_discovery", "model_management", "reranking", "reader", "audio_generation"] {
+        status := record["capabilities"][name]
+        capabilities[name] = status == "verified" || status == "experimental"
+    }
+    if id == "voyage" || id == "jina" { capabilities["embeddings"] = true }
+    for name in enabled {
+        status := get(record["capabilities"], name, "unknown")
+        if status != "verified" && status != "experimental" {
+            return {"ok": false, "error": "Requested capability has no implementation for this provider."}
+        }
+        capabilities[name] = true
+    }
+
+    provider["name"] = id
+    provider["capabilities"] = capabilities
+    provider["allow_anonymous"] = local
+    provider["registered_provider"] = true
+    provider["stream_usage"] = get(options, "stream_usage", false)
+    if type(provider["stream_usage"]) != "bool" { return {"ok": false, "error": "stream_usage must be boolean."} }
+    provider["models"] = [{"model": model, "quality_tier": "unknown", "source": "configured_provider"}]
+    return {"ok": true, "provider": provider, "record": record}
+}

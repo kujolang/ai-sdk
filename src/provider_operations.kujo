@@ -1,0 +1,155 @@
+from ai_sdk import execute_provider_operation, standard_error_response, provider_supports
+
+func get(value, key, fallback) {
+    if type(value) == "dict" && has_key(value, key) { return value[key] }
+    return fallback
+}
+
+func operation_error(client, code, message, status) {
+    return standard_error_response(client, code, message, status, null, false)
+}
+
+func ready_string(value) {
+    return type(value) == "string" && len(trim(value)) > 0
+}
+
+export func discover_provider_models(client, options) {
+    provider := client["provider"]
+    if !provider_supports(provider, "model_discovery") {
+        return operation_error(client, "unsupported_feature", "Provider has no model discovery endpoint.", 0)
+    }
+    result := execute_provider_operation(client, "models", provider["base_url"], "/models", "GET", null, options)
+    if !result["ok"] { return result }
+    models := get(result["data"], "data", null)
+    if type(models) != "array" {
+        return operation_error(client, "invalid_response", "Provider model list must be an array.", result["status_code"])
+    }
+    for model in models {
+        if !ready_string(get(model, "id", "")) {
+            return operation_error(client, "invalid_response", "Provider model list contains an invalid model ID.", result["status_code"])
+        }
+    }
+    result["models"] = models
+    return result
+}
+
+export func rerank(client, model, query, documents, options) {
+    provider := client["provider"]
+    if !provider_supports(provider, "reranking") {
+        return operation_error(client, "unsupported_feature", "Provider has no reranking endpoint.", 0)
+    }
+    if !ready_string(model) || !ready_string(query) || type(documents) != "array" || len(documents) == 0 || len(documents) > 1000 {
+        return operation_error(client, "config_error", "Set a reranking model, query and one to 1000 documents.", 0)
+    }
+    for document in documents {
+        if !ready_string(document) {
+            return operation_error(client, "config_error", "Reranking documents must be non-empty strings.", 0)
+        }
+    }
+
+    count := get(options, "top_n", len(documents))
+    if type(count) != "int" || count < 1 || count > len(documents) {
+        return operation_error(client, "config_error", "top_n must be within the document count.", 0)
+    }
+    payload := {"model": model, "query": query, "documents": documents, "return_documents": false}
+    field := "top_n"
+    result_field := "results"
+    if provider["name"] == "voyage" {
+        field = "top_k"
+        result_field = "data"
+        truncation := get(options, "truncation", null)
+        if truncation != null {
+            if type(truncation) != "bool" {
+                return operation_error(client, "config_error", "truncation must be boolean.", 0)
+            }
+            payload["truncation"] = truncation
+        }
+    }
+    payload[field] = count
+
+    result := execute_provider_operation(client, "rerank", provider["base_url"], "/rerank", "POST", payload, options)
+    if !result["ok"] { return result }
+    data := result["data"]
+    raw_ranks := get(data, result_field, null)
+    if type(raw_ranks) != "array" || len(raw_ranks) != count {
+        return operation_error(client, "invalid_response", "Reranker returned the wrong result count.", result["status_code"])
+    }
+    seen := {}
+    rankings := []
+    for rank in raw_ranks {
+        index := get(rank, "index", null)
+        score := get(rank, "relevance_score", null)
+        if type(index) != "int" || index < 0 || index >= len(documents) || (type(score) != "int" && type(score) != "float") || has_key(seen, to_string(index)) {
+            return operation_error(client, "invalid_response", "Reranker returned an invalid index or score.", result["status_code"])
+        }
+        seen[to_string(index)] = true
+        rankings = push(rankings, {"index": index, "score": score})
+    }
+    tokens := get(get(data, "usage", {}), "total_tokens", null)
+    usage_source := "provider"
+    if type(tokens) != "int" || tokens < 0 { tokens = null; usage_source = "unavailable" }
+    return {
+        "ok": true, "provider": result["provider"], "status_code": result["status_code"],
+        "model": get(data, "model", model), "rankings": rankings,
+        "usage": {"total_tokens": tokens, "usage_source": usage_source}, "observability": result["observability"]
+    }
+}
+
+export func jina_read(client, url, options) {
+    # Callers should approve the public source URL before passing it to Reader.
+    if !ready_string(url) || len(url) > 8192 || !starts_with(url, "https://") || contains(url, "@") || contains(url, "?") || contains(url, "#") {
+        return operation_error(client, "config_error", "Reader requires a public HTTPS URL without credentials, query, or fragment.", 0)
+    }
+    result := execute_provider_operation(client, "reader", "https://r.jina.ai", "/", "POST", {"url": url}, options)
+    if !result["ok"] { return result }
+    content := get(get(result["data"], "data", {}), "content", null)
+    if type(content) != "string" {
+        return operation_error(client, "invalid_response", "Reader response is missing text content.", result["status_code"])
+    }
+    result["content"] = content
+    return result
+}
+
+export func minimax_speech(client, model, voice_id, text, options) {
+    if !ready_string(model) || !ready_string(voice_id) || !ready_string(text) || len(text) > 10000 {
+        return operation_error(client, "config_error", "Set a speech model, voice ID, and up to 10000 characters of text.", 0)
+    }
+    payload := {
+        "model": model, "text": text, "stream": false, "output_format": "hex",
+        "voice_setting": {"voice_id": voice_id}, "audio_setting": {"format": "mp3"}
+    }
+    result := execute_provider_operation(client, "speech", client["provider"]["base_url"], "/t2a_v2", "POST", payload, options)
+    if !result["ok"] { return result }
+    data := result["data"]
+    provider_status := get(get(data, "base_resp", {}), "status_code", null)
+    if provider_status != 0 {
+        return operation_error(client, "provider_error", "MiniMax rejected the speech request.", result["status_code"])
+    }
+    audio := get(get(data, "data", {}), "audio", null)
+    if !ready_string(audio) || len(audio) % 2 != 0 || !regex_match(audio, "^[A-Fa-f0-9]+$") {
+        return operation_error(client, "invalid_response", "MiniMax response lacks valid hex audio.", result["status_code"])
+    }
+    result["audio_hex"] = audio
+    return result
+}
+
+export func lm_studio_models(client, action, identifier, options) {
+    base := client["provider"]["base_url"]
+    if !ends_with(base, "/v1") {
+        return operation_error(client, "config_error", "LM Studio management requires a compatible base URL ending in /v1.", 0)
+    }
+    origin := substring(base, 0, len(base) - 3)
+    if action == "list" {
+        return execute_provider_operation(client, "model_management", origin, "/api/v1/models", "GET", null, options)
+    }
+    if !ready_string(identifier) {
+        return operation_error(client, "config_error", "Set a model key for load or an instance ID for unload.", 0)
+    }
+    if action == "load" {
+        return execute_provider_operation(client, "model_management", origin, "/api/v1/models/load", "POST", {"model": identifier}, options)
+    }
+    if action == "unload" {
+        return execute_provider_operation(client, "model_management", origin, "/api/v1/models/unload", "POST", {"instance_id": identifier}, options)
+    }
+    return operation_error(client, "config_error", "Model management action must be list, load, or unload.", 0)
+}

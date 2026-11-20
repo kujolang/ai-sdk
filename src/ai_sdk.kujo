@@ -205,11 +205,16 @@ func create_client_impl(provider, api_key_override) {
 
 	api_key := api_key_override
 	if type(api_key) == "null" {
-		api_key := env(dict_get_or(provider, "api_key_env", ""))
-	}
+        key_env := dict_get_or(provider, "api_key_env", "")
+        if key_env != "" { api_key = env(key_env) }
+    }
 	if type(api_key) == "null" {
 		api_key := ""
 	}
+    if dict_get_or(provider, "registered_provider", false) && type(api_key) != "string" {
+        config_error = "Provider API key must be a string."
+        api_key = ""
+    }
 
 	return {
 		"provider": provider,
@@ -420,9 +425,23 @@ func resolve_chat_options(client, options) {
 	resolved["endpoint_allowlist_enabled"] := resolve_option_with_default(options, "endpoint_allowlist_enabled", resolved["endpoint_allowlist_enabled"])
 	resolved["endpoint_allowlist_hosts"] := resolve_option_with_default(options, "endpoint_allowlist_hosts", resolved["endpoint_allowlist_hosts"])
 	resolved["redirects"] := resolve_option_with_default(options, "redirects", resolved["redirects"])
+    if dict_get_or(client["provider"], "registered_provider", false) {
+        resolved["provider_evidence"] = {
+            "provider": client["provider"]["name"],
+            "model": resolved["model"],
+            "host": provider_host_from_base_url(client["provider"]["base_url"])
+        }
+        resolved["redirects"] = "none"
+        resolved["allow_unsafe_header_override"] = false
+        if type(resolved["max_retries"]) != "int" || resolved["max_retries"] > 3 { resolved["max_retries"] = 3 }
+    }
 	resolved["on_transport_chunk"] := resolve_option_with_default(options, "on_transport_chunk", null)
 	if type(resolved["on_transport_chunk"]) == "function" { resolved["structured_output_retryable"] = false }
 	resolved["max_raw_response_bytes"] := resolve_option_with_default(options, "max_raw_response_bytes", resolved["max_raw_response_bytes"])
+    if dict_get_or(client["provider"], "registered_provider", false) {
+        limit := resolved["max_raw_response_bytes"]
+        if type(limit) != "int" || limit <= 0 || limit > 8388608 { resolved["max_raw_response_bytes"] = 8388608 }
+    }
 
 	return resolved
 }
@@ -465,6 +484,20 @@ func transport_error_result(client, error, resolved_options, request_context) {
   if contains(message, "HTTP response_stream must be a boolean") {
    return standard_error_response_impl(client, "unsupported_feature", "Incremental transport requires the http_stream_collect runtime backport or a runtime including that API.", 0, null, false)
   }
+  if dict_get_or(client["provider"], "registered_provider", false) {
+   if contains(message, "callback cancelled") {
+    return standard_error_response_impl(client, "cancelled", "Provider stream was cancelled by the callback.", 0, null, false)
+   }
+   if contains(lower(message), "timed out") || contains(lower(message), "timeout") {
+    return standard_error_response_impl(client, "timeout", "Provider request timed out.", 0, null, true)
+   }
+   if contains(lower(message), "certificate") || contains(lower(message), "tls") {
+    return standard_error_response_impl(client, "tls_error", "Provider TLS validation failed.", 0, null, false)
+   }
+   if type(dict_get_or(resolved_options, "on_transport_chunk", null)) != "function" {
+    return standard_error_response_impl(client, "network_error", "Provider connection failed. Check the configured endpoint and model server.", 0, null, true)
+   }
+  }
   if type(dict_get_or(resolved_options, "on_transport_chunk", null)) == "function" {
    return standard_error_response_impl(client, "transport_error", "Incremental transport failed or was cancelled; the request will not be replayed.", 0, null, false)
   }
@@ -499,7 +532,7 @@ func build_chat_payload_with_resolved(client, messages, options, resolved) {
 		"max_tokens": resolved["max_tokens"],
 		"stream": resolved["stream"]
 	}
-	if resolved["stream"] {
+	if resolved["stream"] && dict_get_or(client["provider"], "stream_usage", true) {
 		# OpenAI-compatible providers only include token accounting in the
 		# terminal stream event when explicitly requested.
 		payload["stream_options"] := {"include_usage": true}
@@ -512,6 +545,16 @@ func build_chat_payload_with_resolved(client, messages, options, resolved) {
 		if has_key(options, "response_format") {
 			payload["response_format"] := options["response_format"]
 		}
+        if dict_get_or(client["provider"], "registered_provider", false) {
+            for field in ["tool_choice", "parallel_tool_calls", "top_p", "seed"] {
+                if has_key(options, field) { payload[field] = options[field] }
+            }
+            if provider_supports_impl(client["provider"], "reasoning") {
+                for field in ["reasoning_effort", "reasoning", "thinking", "enable_thinking", "thinking_budget"] {
+                    if has_key(options, field) { payload[field] = options[field] }
+                }
+            }
+        }
 	}
 
 	return payload
@@ -672,6 +715,10 @@ func redact_error_diagnostic(client, value) {
 }
 
 func standard_error_response_impl(client, error_code, message, status_code, raw, retryable) {
+    if dict_get_or(dict_get_or(client, "provider", {}), "registered_provider", false) && (error_code == "invalid_json" || error_code == "invalid_response") {
+        message = "Provider returned a malformed response."
+        raw = null
+    }
 	return {
 		"ok": false,
 		"provider": client["provider"]["name"],
@@ -792,7 +839,21 @@ func enforce_endpoint_allowlist_policy(client, resolved_options) {
 	)
 }
 
+func registered_http_error(client, status) {
+    code := "provider_error"
+    message := "Provider rejected the request."
+    if status == 401 || status == 403 { code = "auth_error"; message = "Provider authentication or access failed." }
+    if status == 404 { code = "not_found"; message = "Check the API path and the loaded or available model ID." }
+    if status == 408 || status == 504 { code = "timeout"; message = "Provider request timed out." }
+    if status == 429 { code = "rate_limit"; message = "Provider rate limit exceeded." }
+    if status >= 300 && status < 400 { code = "endpoint_policy_violation"; message = "Provider redirect was rejected." }
+    return standard_error_response_impl(client, code, message, status, null, is_retryable_http_status(status))
+}
+
 func normalize_provider_error_payload(client, status_code, data) {
+    if dict_get_or(client["provider"], "registered_provider", false) {
+        return registered_http_error(client, status_code)
+    }
 	err_obj := {}
 	if type(data) == "dict" {
 		err_obj := dict_get_or(data, "error", {})
@@ -1515,9 +1576,18 @@ func build_embeddings_payload_with_resolved(client, input_value, options, resolv
 	}
 
 	if type(options) == "dict" {
-		if has_key(options, "dimensions") {
-			payload["dimensions"] := options["dimensions"]
-		}
+        provider_name := client["provider"]["name"]
+        if has_key(options, "dimensions") {
+            dimension_field := "dimensions"
+            if provider_name == "voyage" { dimension_field = "output_dimension" }
+            payload[dimension_field] = options["dimensions"]
+        }
+        if provider_name == "voyage" {
+            for field in ["input_type", "truncation"] {
+                if has_key(options, field) { payload[field] = options[field] }
+            }
+        }
+        if provider_name == "jina" && has_key(options, "task") { payload["task"] = options["task"] }
 	}
 
 	return payload
@@ -1667,6 +1737,57 @@ func fixture_embeddings_response_impl(client, payload) {
 	}
 }
 
+func valid_embedding_batch(data, expected_count, expected_dimension) {
+    rows := dict_get_or(data, "data", null)
+    if type(rows) != "array" || len(rows) != expected_count { return false }
+    seen := {}
+    dimension := expected_dimension
+    for row in rows {
+        index := dict_get_or(row, "index", null)
+        vector := dict_get_or(row, "embedding", null)
+        if type(index) != "int" || index < 0 || index >= expected_count || type(vector) != "array" || len(vector) == 0 { return false }
+        key := to_string(index)
+        if has_key(seen, key) { return false }
+        seen[key] = true
+        if dimension == null { dimension = len(vector) }
+        if len(vector) != dimension { return false }
+        for value in vector {
+            if type(value) != "int" && type(value) != "float" { return false }
+        }
+    }
+    return true
+}
+
+func provider_usage_available(usage) {
+    for field in ["prompt_tokens", "input_tokens", "completion_tokens", "output_tokens", "total_tokens"] {
+        value := dict_get_or(usage, field, null)
+        if type(value) == "int" && value >= 0 { return true }
+    }
+    return false
+}
+
+func valid_registered_chat(choices) {
+    if type(choices) != "array" || len(choices) == 0 { return false }
+    message := dict_get_or(choices[0], "message", null)
+    if type(message) != "dict" { return false }
+    content := dict_get_or(message, "content", null)
+    tools := dict_get_or(message, "tool_calls", [])
+    return type(content) == "string" || type(content) == "array" || (type(tools) == "array" && len(tools) > 0)
+}
+
+func registered_stream_completed(events) {
+    finished := false
+    for event in events {
+        if type(event) != "dict" || has_key(event, "error") { return false }
+        choices := dict_get_or(event, "choices", [])
+        if type(choices) == "array" && len(choices) > 0 {
+            reason := dict_get_or(choices[0], "finish_reason", null)
+            if type(reason) == "string" && reason != "" { finished = true }
+        }
+    }
+    return finished
+}
+
 func normalize_embeddings_success_response(client, status_code, data, fallback_model) {
 	model := dict_get_or(data, "model", fallback_model)
 	embeddings := []
@@ -1771,9 +1892,15 @@ func build_driver_request_context(client, payload, options, resolved_options, op
 		extra_headers := dict_get_or(options, "headers", null)
 		allow_protected_header_override := resolved_options["allow_unsafe_header_override"]
 	}
-	if !allow_protected_header_override && type(extra_headers) == "dict" {
-		filtered := {}
-		for name in keys(extra_headers) { if !contains_ci(descriptor["protected_headers"], name) { filtered[name] = extra_headers[name] } }
+    if !allow_protected_header_override && type(extra_headers) == "dict" {
+        filtered := {}
+        blocked := descriptor["protected_headers"]
+        if dict_get_or(client["provider"], "registered_provider", false) {
+            blocked = [...blocked, "Host", "Proxy-Authorization", "Content-Length", "Transfer-Encoding", "Connection"]
+        }
+        for name in keys(extra_headers) {
+            if !contains_ci(blocked, name) { filtered[name] = extra_headers[name] }
+        }
 		extra_headers = filtered
 	}
 	headers := merge_headers_with_policy(headers, extra_headers, allow_protected_header_override)
@@ -1804,6 +1931,19 @@ func semantic_embeddings_result(client, status_code, value) {
 }
 
 func driver_error_result(client, status_code, response, body_text) {
+    if dict_get_or(client["provider"], "registered_provider", false) {
+        result := registered_http_error(client, status_code)
+        if status_code == 429 || status_code == 503 {
+            headers := dict_get_or(response, "_headers", dict_get_or(response, "headers", {}))
+            for name in keys(headers) {
+                value := headers[name]
+                if lower(name) == "retry-after" && type(value) == "string" && regex_match(value, "^[0-9]{1,9}$") {
+                    result["retry_after_ms"] = to_int(value) * 1000
+                }
+            }
+        }
+        return result
+    }
 	if dict_get_or(client["driver"], "id", "") == "openai-compatible" { return normalize_http_failure_response(client, status_code, response, body_text) }
 	parsed := parse_json_safe(body_text)
 	data := null
@@ -1922,11 +2062,26 @@ func execute_embeddings_request_once(client, payload, resolved_options, attempt,
 				return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
 			}
 
+            registered := dict_get_or(client["provider"], "registered_provider", false)
+            if registered {
+                expected_count := 1
+                if type(payload["input"]) == "array" { expected_count = len(payload["input"]) }
+                dimension := dict_get_or(payload, "dimensions", dict_get_or(payload, "output_dimension", null))
+                if !valid_embedding_batch(data, expected_count, dimension) {
+                    result := standard_error_response_impl(client, "invalid_response", "Provider returned an invalid embedding batch.", status_code, null, false)
+                    return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
+                }
+            }
 			result := null
 			if dict_get_or(client["driver"], "id", "") == "openai-compatible" { result = normalize_embeddings_success_response(client, status_code, data, payload["model"]) } else {
 				decoded := driver_hook(client, "decode_embeddings", {"status_code": status_code, "data": data, "body_text": body_text, "fallback_model": payload["model"]})
 				if decoded["ok"] { result = semantic_embeddings_result(client, status_code, decoded["value"]) } else { result = standard_error_response_impl(client, "invalid_response", decoded["error"], status_code, null, false) }
 			}
+            if registered && result["ok"] {
+                source := "unavailable"
+                if provider_usage_available(dict_get_or(data, "usage", null)) { source = "provider" }
+                result["usage"] = {...result["usage"], "usage_source": source}
+            }
 			return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
 		}
 		case Err(error): {
@@ -1985,7 +2140,7 @@ func embeddings_impl(client, input_value, options) {
 						continue
 					}
 
-					fallback_api_key := client["api_key"]
+					fallback_api_key := null
 					if has_key(entry, "api_key") {
 						fallback_api_key := entry["api_key"]
 					}
@@ -2041,6 +2196,28 @@ func embeddings_impl(client, input_value, options) {
 	}
 
 	payload := build_embeddings_payload_with_resolved(client, input_value, options, resolved_options)
+    if dict_get_or(client["provider"], "registered_provider", false) {
+        inputs := input_value
+        if type(inputs) == "string" { inputs = [inputs] }
+        if type(inputs) != "array" || len(inputs) == 0 || len(inputs) > 1000 {
+            return standard_error_response_impl(client, "config_error", "Expected one to 1000 embedding texts.", 0, null, false)
+        }
+        for item in inputs {
+            if type(item) != "string" || len(trim(item)) == 0 {
+                return standard_error_response_impl(client, "config_error", "Embedding inputs must be non-empty strings.", 0, null, false)
+            }
+        }
+        dimension := dict_get_or(options, "dimensions", null)
+        if dimension != null && (type(dimension) != "int" || dimension < 1) {
+            return standard_error_response_impl(client, "config_error", "Embedding dimensions must be a positive integer.", 0, null, false)
+        }
+        input_type := dict_get_or(payload, "input_type", null)
+        if input_type != null && input_type != "query" && input_type != "document" {
+            return standard_error_response_impl(client, "config_error", "Voyage input_type must be query or document.", 0, null, false)
+        }
+        if client["provider"]["name"] == "jina" && type(payload["input"]) == "string" { payload["input"] = inputs }
+    }
+
 	input_characters := embeddings_input_character_count(input_value)
 	max_prompt_characters := dict_get_or(resolved_options, "max_prompt_characters", 20000)
 	if input_characters > max_prompt_characters {
@@ -2145,6 +2322,8 @@ func embeddings_impl(client, input_value, options) {
 		}
 
 		delay_ms := compute_retry_delay_ms(attempt, base_retry_delay_ms, max_retry_delay_ms, retry_jitter_ms)
+        provider_delay := dict_get_or(result, "retry_after_ms", 0)
+        if provider_delay > delay_ms { delay_ms = min(provider_delay, max_retry_delay_ms) }
 		retry_count := retry_count + 1
 		retry_hook := dict_get_or(resolved_options, "on_retry", null)
 		if type(retry_hook) == "function" {
@@ -2189,7 +2368,19 @@ func embeddings_impl(client, input_value, options) {
 	)
 }
 
-func parse_sse_lines(body_text) {
+func append_sse_event(events, payload, strict) {
+    parsed := parse_json_safe(payload)
+    if parsed["ok"] && (!strict || type(parsed["data"]) == "dict") {
+        return push(events, parsed["data"])
+    }
+    if strict { return push(events, {"error": "malformed_sse_event"}) }
+    return events
+}
+
+func parse_sse_lines(body_text) { return parse_sse_lines_checked(body_text, false) }
+func parse_sse_chunks(chunks) { return parse_sse_chunks_checked(chunks, false) }
+
+func parse_sse_lines_checked(body_text, strict) {
 	stream_events := []
 	current_payload := ""
 	lines := split(body_text, "\n")
@@ -2201,10 +2392,7 @@ func parse_sse_lines(body_text) {
 			payload_text := trim(substring(line, 5, len(line)))
 			if payload_text == "[DONE]" {
 				if current_payload != "" {
-					parsed_event := parse_json_safe(current_payload)
-					if parsed_event["ok"] {
-						stream_events := push(stream_events, parsed_event["data"])
-					}
+					stream_events = append_sse_event(stream_events, current_payload, strict)
 					current_payload := ""
 				}
 				break
@@ -2219,10 +2407,7 @@ func parse_sse_lines(body_text) {
 		} else {
 			if line == "" {
 				if current_payload != "" {
-					parsed_event := parse_json_safe(current_payload)
-					if parsed_event["ok"] {
-						stream_events := push(stream_events, parsed_event["data"])
-					}
+					stream_events = append_sse_event(stream_events, current_payload, strict)
 					current_payload := ""
 				}
 			}
@@ -2231,16 +2416,13 @@ func parse_sse_lines(body_text) {
 	}
 
 	if current_payload != "" {
-		parsed_event := parse_json_safe(current_payload)
-		if parsed_event["ok"] {
-			stream_events := push(stream_events, parsed_event["data"])
-		}
+		stream_events = append_sse_event(stream_events, current_payload, strict)
 	}
 
 	return stream_events
 }
 
-func parse_sse_chunks(chunks) {
+func parse_sse_chunks_checked(chunks, strict) {
 	stream_events := []
 	current_payload := ""
 	buffer := ""
@@ -2269,10 +2451,7 @@ func parse_sse_chunks(chunks) {
 				payload_text := trim(substring(line, 5, len(line)))
 				if payload_text == "[DONE]" {
 					if current_payload != "" {
-						parsed_event := parse_json_safe(current_payload)
-						if parsed_event["ok"] {
-							stream_events := push(stream_events, parsed_event["data"])
-						}
+						stream_events = append_sse_event(stream_events, current_payload, strict)
 						current_payload := ""
 					}
 					return stream_events
@@ -2287,10 +2466,7 @@ func parse_sse_chunks(chunks) {
 			} else {
 				if line == "" {
 					if current_payload != "" {
-						parsed_event := parse_json_safe(current_payload)
-						if parsed_event["ok"] {
-							stream_events := push(stream_events, parsed_event["data"])
-						}
+						stream_events = append_sse_event(stream_events, current_payload, strict)
 						current_payload := ""
 					}
 				}
@@ -2317,10 +2493,7 @@ func parse_sse_chunks(chunks) {
 	}
 
 	if current_payload != "" {
-		parsed_event := parse_json_safe(current_payload)
-		if parsed_event["ok"] {
-			stream_events := push(stream_events, parsed_event["data"])
-		}
+		stream_events = append_sse_event(stream_events, current_payload, strict)
 	}
 
 	return stream_events
@@ -2572,6 +2745,10 @@ func finalize_request_result(result, resolved_options, attempt, started_at, trac
 			"trace_id": trace_id,
 			"request_id": request_id
 		}
+        evidence := dict_get_or(resolved_options, "provider_evidence", null)
+        if type(evidence) == "dict" {
+            event = {...event, ...evidence, "stream_completed": dict_get_or(result, "stream_completed", null), "usage": dict_get_or(result, "usage", null)}
+        }
 		emit_hook_safe(complete_hook, event)
 	}
 	result["observability"] := {
@@ -2628,6 +2805,13 @@ func enforce_structured_output_contract(client, result, resolved_options) {
 
 	output_text := dict_get_or(result, "output_text", "")
 	parsed := parse_json_safe(output_text)
+    if dict_get_or(client["provider"], "registered_provider", false) {
+        if parsed["ok"] {
+            validation := json_schema_validate(parsed["data"], schema)
+            if dict_get_or(validation, "valid", false) { return result }
+        }
+        return standard_error_response_impl(client, "structured_output_invalid", "Provider output did not match the configured JSON schema.", 422, null, false)
+    }
 	if !parsed["ok"] {
 		return standard_error_response_impl(
 			client,
@@ -3081,16 +3265,32 @@ func execute_request_once(client, messages, options, resolved_options, payload, 
 					result = enforce_structured_output_contract(client, result, resolved_options)
 					return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
 				}
+                registered := dict_get_or(client["provider"], "registered_provider", false)
 				if type(stream_chunks) == "array" {
-					stream_events := parse_sse_chunks(stream_chunks)
+					stream_events = parse_sse_chunks_checked(stream_chunks, registered)
 				}
 				if len(stream_events) == 0 {
-					stream_events := parse_sse_lines(body_text)
+					stream_events = parse_sse_lines_checked(body_text, registered)
 				}
+                if registered && !registered_stream_completed(stream_events) {
+                    result := standard_error_response_impl(client, "stream_interrupted", "Provider stream ended without a successful terminal choice.", status_code, null, false)
+                    return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
+                }
 				if len(stream_events) > 0 {
 					result := normalize_stream_success_response(client, status_code, stream_events, payload["model"])
+                    if registered {
+                        available := false
+                        for event in stream_events {
+                            if provider_usage_available(dict_get_or(event, "usage", null)) { available = true }
+                        }
+                        if !available {
+                            result["usage"] = {...result["usage"], "usage_source": "unavailable", "total_semantics": "unavailable"}
+                        }
+                        result["stream_completed"] = true
+                    }
 					result := apply_governance_post_response(client, result, messages, payload, resolved_options)
 					result := enforce_structured_output_contract(client, result, resolved_options)
+                    result = validate_required_tool_call(client, result, options)
 					return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
 				}
 			}
@@ -3119,13 +3319,22 @@ func execute_request_once(client, messages, options, resolved_options, payload, 
 				return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
 			}
 
+            registered := dict_get_or(client["provider"], "registered_provider", false)
+            if registered && !valid_registered_chat(dict_get_or(data, "choices", null)) {
+                result := standard_error_response_impl(client, "invalid_response", "Provider response is missing a chat choice with content or tools.", status_code, null, false)
+                return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
+            }
 			result := null
 			if dict_get_or(client["driver"], "id", "") == "openai-compatible" { result = normalize_success_response(client, status_code, data, payload["model"]) } else {
 				decoded := driver_hook(client, "decode_chat", {"status_code": status_code, "data": data, "body_text": body_text, "fallback_model": payload["model"]})
 				if decoded["ok"] { result = semantic_chat_result(client, status_code, decoded["value"]) } else { result = standard_error_response_impl(client, "invalid_response", decoded["error"], status_code, null, false) }
 			}
+            if registered && result["ok"] && !provider_usage_available(dict_get_or(data, "usage", null)) {
+                result["usage"] = {...result["usage"], "usage_source": "unavailable", "total_semantics": "unavailable"}
+            }
 			result := apply_governance_post_response(client, result, messages, payload, resolved_options)
 			result := enforce_structured_output_contract(client, result, resolved_options)
+            result = validate_required_tool_call(client, result, options)
 			return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
 		}
 		case Err(error): {
@@ -3166,7 +3375,9 @@ func build_primary_options_for_fallback(options) {
 func merge_fallback_options(base_options, override_options) {
 	merged := {}
 	for key in keys(base_options) {
-		merged[key] := base_options[key]
+        if key != "headers" && key != "allow_unsafe_header_override" {
+            merged[key] = base_options[key]
+        }
 	}
 	if type(override_options) == "dict" {
 		for key in keys(override_options) {
@@ -3177,7 +3388,65 @@ func merge_fallback_options(base_options, override_options) {
 	return merged
 }
 
+func validate_required_tool_call(client, result, options) {
+    if !result["ok"] || !dict_get_or(client["provider"], "registered_provider", false) { return result }
+    choice := dict_get_or(options, "tool_choice", null)
+    if choice != "required" && type(choice) != "dict" { return result }
+    expected := dict_get_or(dict_get_or(choice, "function", {}), "name", "")
+    for call in result["tool_calls"] {
+        function := dict_get_or(call, "function", {})
+        name := dict_get_or(function, "name", "")
+        arguments := dict_get_or(function, "arguments", null)
+        if name != "" && (expected == "" || name == expected) && type(arguments) == "string" {
+            parsed := parse_json_safe(arguments)
+            if parsed["ok"] && type(parsed["data"]) == "dict" { return result }
+        }
+    }
+    return standard_error_response_impl(client, "required_tool_call_missing", "Provider did not return the required tool call with JSON object arguments.", result["status_code"], null, false)
+}
+
+func registered_chat_preflight(client, options) {
+    if !dict_get_or(client["provider"], "registered_provider", false) { return null }
+    provider := client["provider"]
+    if !provider_supports_impl(provider, "chat") {
+        return standard_error_response_impl(client, "unsupported_feature", "Provider has no chat endpoint.", 0, null, false)
+    }
+    selected_model := dict_get_or(options, "model", provider["default_model"])
+    if type(selected_model) != "string" || len(trim(selected_model)) == 0 || len(selected_model) > 512 {
+        return standard_error_response_impl(client, "config_error", "Set a valid provider model identifier.", 0, null, false)
+    }
+    format := dict_get_or(options, "response_format", {})
+    format_type := dict_get_or(format, "type", "")
+    if format_type == "json_schema" && !provider_supports_impl(provider, "json_schema") {
+        return standard_error_response_impl(client, "unsupported_feature", "Enable json_schema only for a compatible model and deployment.", 0, null, false)
+    }
+    if format_type == "json_object" && !provider_supports_impl(provider, "json_mode") {
+        return standard_error_response_impl(client, "unsupported_feature", "Enable json_mode only for a compatible model and deployment.", 0, null, false)
+    }
+    if (dict_get_or(options, "tools", null) != null || dict_get_or(options, "tool_choice", null) != null) && !provider_supports_impl(provider, "tool_calls") {
+        return standard_error_response_impl(client, "unsupported_feature", "Enable tool_calls only for a compatible model and deployment.", 0, null, false)
+    }
+    for field in ["reasoning_effort", "reasoning", "thinking", "enable_thinking", "thinking_budget"] {
+        if dict_get_or(options, field, null) != null && !provider_supports_impl(provider, "reasoning") {
+            return standard_error_response_impl(client, "unsupported_feature", "Enable reasoning for a compatible model and deployment.", 0, null, false)
+        }
+    }
+    return null
+}
+
 func chat_completion_impl(client, messages, options) {
+    preflight := registered_chat_preflight(client, options)
+    if preflight != null { return preflight }
+    if dict_get_or(client["provider"], "registered_provider", false) {
+        format := dict_get_or(options, "response_format", {})
+        if dict_get_or(format, "type", "") == "json_schema" {
+            schema := dict_get_or(dict_get_or(format, "json_schema", {}), "schema", null)
+            if type(schema) != "dict" {
+                return standard_error_response_impl(client, "config_error", "response_format.json_schema.schema must be a schema object.", 0, null, false)
+            }
+            options = {...options, "structured_output_schema": schema}
+        }
+    }
 	fallback_disabled := false
 	if type(options) == "dict" {
 		fallback_disabled := dict_get_or(options, "_fallback_disabled", false)
@@ -3215,7 +3484,7 @@ func chat_completion_impl(client, messages, options) {
 						continue
 					}
 
-					fallback_api_key := client["api_key"]
+					fallback_api_key := null
 					if has_key(entry, "api_key") {
 						fallback_api_key := entry["api_key"]
 					}
@@ -3271,7 +3540,7 @@ func chat_completion_impl(client, messages, options) {
 		if has_key(fixture_payload, "tools") && !provider_supports_impl(client["provider"], "tool_calls") {
 			return standard_error_response_impl(client, "unsupported_feature", "Provider does not support tool calls.", 0, null, false)
 		}
-		if request_requires_json_mode(options, resolved_options) && !provider_supports_impl(client["provider"], "json_mode") {
+		if request_requires_json_mode(options, resolved_options) && !provider_supports_impl(client["provider"], "json_mode") && !provider_supports_impl(client["provider"], "json_schema") {
 			return standard_error_response_impl(client, "unsupported_feature", "Provider does not support JSON/structured output mode. Remove structured_output_schema/response_format or use a json_mode-capable provider.", 0, null, false)
 		}
 		fixture_result := fixture_response_impl(client, fixture_payload)
@@ -3305,7 +3574,7 @@ func chat_completion_impl(client, messages, options) {
 	}
 
 	if request_requires_json_mode(options, resolved_options) {
-		if !provider_supports_impl(client["provider"], "json_mode") {
+		if !provider_supports_impl(client["provider"], "json_mode") && !provider_supports_impl(client["provider"], "json_schema") {
 			return standard_error_response_impl(
 				client,
 				"unsupported_feature",
@@ -3464,6 +3733,8 @@ func chat_completion_impl(client, messages, options) {
 		}
 
 		delay_ms := compute_retry_delay_ms(attempt, base_retry_delay_ms, max_retry_delay_ms, retry_jitter_ms)
+        provider_delay := dict_get_or(result, "retry_after_ms", 0)
+        if provider_delay > delay_ms { delay_ms = min(provider_delay, max_retry_delay_ms) }
 		retry_count := retry_count + 1
 		retry_hook := dict_get_or(resolved_options, "on_retry", null)
 		if type(retry_hook) == "function" {
@@ -3742,6 +4013,107 @@ func chat_completion_stream_impl(client, messages, options, on_event) {
 	result["emitted_events"] := emitted_events
 
 	return result
+}
+
+# Fixed operation descriptors are supplied by provider_operations, the trusted
+# SDK module. Caller-controlled parameters belong in the body, never the URL.
+export func execute_provider_operation(client, operation, base_url, path, method, payload, options) {
+    if !dict_get_or(client["provider"], "registered_provider", false) || client["config_error"] != "" {
+        return standard_error_response_impl(client, "config_error", "Expected a configured registry client.", 0, null, false)
+    }
+    resolved := resolve_chat_options(client, options)
+    target := {...client, "provider": {...client["provider"], "base_url": base_url}}
+    provider := client["provider"]
+    fixed := base_url == provider["base_url"] && (
+        (operation == "models" && provider_supports_impl(provider, "model_discovery") && path == "/models" && method == "GET") ||
+        (operation == "rerank" && provider_supports_impl(provider, "reranking") && path == "/rerank" && method == "POST") ||
+        (operation == "speech" && provider["name"] == "minimax" && path == "/t2a_v2" && method == "POST")
+    )
+    reader := provider["name"] == "jina" && base_url == "https://r.jina.ai" && operation == "reader" && path == "/" && method == "POST"
+    configured_url := provider["base_url"]
+    studio := provider["name"] == "lm-studio" && ends_with(configured_url, "/v1") &&
+        base_url == substring(configured_url, 0, len(configured_url) - 3) && operation == "model_management" &&
+        ((path == "/api/v1/models" && method == "GET") ||
+         ((path == "/api/v1/models/load" || path == "/api/v1/models/unload") && method == "POST"))
+    if !fixed && !reader && !studio {
+        return standard_error_response_impl(client, "endpoint_policy_violation", "Operation endpoint does not match its provider.", 0, null, false)
+    }
+    policy_error := enforce_endpoint_allowlist_policy(target, resolved)
+    if policy_error != null { return policy_error }
+    credential := client["api_key"]
+    if credential == "" && !client["provider"]["allow_anonymous"] && operation != "reader" {
+        return standard_error_response_impl(client, "auth_error", "Configure the provider API key before making this request.", 0, null, false)
+    }
+    headers := {"Content-Type": "application/json"}
+    if type(credential) == "string" && credential != "" { headers["Authorization"] = "Bearer " + credential }
+    for name in keys(headers) {
+        if header_entry_has_injection_risk(name, headers[name]) {
+            return standard_error_response_impl(client, "config_error", "Invalid provider credential header.", 0, null, false)
+        }
+    }
+    headers["Accept"] = "application/json"
+    started_at := current_timestamp()
+    deadline := resolve_request_deadline_ms(resolved, started_at)
+    request := {"method": method, "_headers": headers, "timeout": resolved["timeout"]}
+    if deadline > 0 {
+        remaining := deadline - started_at
+        if remaining <= 0 { return deadline_exceeded_response(client, deadline, started_at) }
+        if remaining / 1000.0 < request["timeout"] { request["timeout"] = remaining / 1000.0 }
+    }
+    if resolved["connect_timeout"] > 0 { request["connect_timeout"] = resolved["connect_timeout"] }
+    if resolved["read_timeout"] > 0 { request["read_timeout"] = resolved["read_timeout"] }
+    if method == "POST" {
+        body := to_json(payload)
+        if len(body) > 1048576 {
+            return standard_error_response_impl(client, "request_too_large", "Provider operation request exceeds its size limit.", 0, null, false)
+        }
+        request["_body"] = body
+    }
+    url := base_url + path
+    # Validate the authority as seen by the runtime before invoking any transport.
+    if provider_host_from_base_url(url) != provider_host_from_base_url(base_url) || !starts_with(path, "/") {
+        return standard_error_response_impl(client, "endpoint_policy_violation", "Provider operation URL is invalid.", 0, null, false)
+    }
+    trace_id := resolved["trace_id"]
+    if trace_id == "" { trace_id = uuid_v4() }
+    request_id := trace_id + "-attempt-0"
+    emit_hook_safe(resolved["on_request_start"], {
+        "operation": operation, "provider": client["provider"]["name"], "model": resolved["model"],
+        "host": provider_host_from_base_url(base_url), "attempt": 0, "started_at": started_at,
+        "trace_id": trace_id, "request_id": request_id
+    })
+    transport := resolve_transport_with_resolved(client, resolved)
+    response := null
+    result := standard_error_response_impl(client, "transport_error", "Provider operation transport failed.", 0, null, false)
+    try { response = transport(url, transport_options(request, {...resolved, "on_transport_chunk": null})) } except err { response = null }
+    match response {
+        case Ok(value): {
+            status := dict_get_or(value, "_status", dict_get_or(value, "status", 0))
+            body := dict_get_or(value, "_body", dict_get_or(value, "body", ""))
+            size_error := response_size_guardrail_error(client, status, body, resolved)
+            if size_error != null {
+                result = size_error
+            } else if status < 200 || status > 299 {
+                code := "provider_error"
+                if status == 401 || status == 403 { code = "auth_error" }
+                if status == 429 { code = "rate_limit" }
+                result = standard_error_response_impl(client, code, "Provider operation returned HTTP " + to_string(status) + ".", status, null, false)
+            } else {
+                parsed := parse_json_safe(body)
+                data := dict_get_or(parsed, "data", null)
+                if type(data) != "dict" || has_key(data, "error") {
+                    result = standard_error_response_impl(client, "invalid_response", "Provider operation did not return a successful JSON object.", status, null, false)
+                } else {
+                    result = {"ok": true, "provider": client["provider"]["name"], "status_code": status, "data": data}
+                }
+            }
+        }
+        case Err(error): {
+            result = transport_error_result(client, error, resolved, {"native_transport": true})
+            result["error"] = {...result["error"], "retryable": false}
+        }
+    }
+    return finalize_request_result(result, resolved, 0, started_at, trace_id, request_id)
 }
 
 export provider_supports := provider_supports_impl

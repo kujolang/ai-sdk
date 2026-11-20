@@ -1,0 +1,197 @@
+test_setup {
+    from src.provider_registry import configure_provider, inspect_provider, list_providers, require_provider_capabilities
+    from src.provider_operations import discover_provider_models, rerank, jina_read, minimax_speech, lm_studio_models
+    from src.ai_sdk import create_client, create_message, chat_completion, embeddings
+}
+
+test "all ten registry presets have independent identities and explicit model configuration" {
+    ids := {}
+    for record in list_providers() {
+        id := record["id"]
+        assert_equal(has_key(ids, id), 0)
+        ids[id] = true
+        if has_key(record, "base_url") == 0 { continue }
+        configured := configure_provider(id, "local-or-account-model", {})
+        assert_true(configured["ok"])
+        assert_equal(configured["provider"]["default_model"], "local-or-account-model")
+        assert_equal(inspect_provider(id)["api_key_env"], record["api_key_env"])
+        assert_equal(configure_provider(id, "", {})["ok"], false)
+    }
+    assert_equal(len(keys(ids)), 35)
+    assert_equal(configure_provider("ollama", "model", {})["ok"], false)
+    assert_equal(configure_provider("unknown", "model", {})["ok"], false)
+}
+
+test "compatible chat contract across all eight inference presets" {
+    for record in list_providers() {
+        if has_key(record, "base_url") == 0 || record["capabilities"]["chat"] == "unsupported" { continue }
+        client_key := ""
+        if record["category"] != "Local" { client_key = "key" }
+        client := create_client(configure_provider(record["id"], "served-model", {})["provider"], client_key)
+        result := chat_completion(client, [create_message("user", "Say hi")], {
+            "redirects": "follow", "allow_unsafe_header_override": true, "headers": {"Authorization": "unsafe"},
+            "max_retries": 0, "transport": func(url, request) {
+                assert_equal(url, record["base_url"] + "/chat/completions")
+                assert_equal(request["redirects"], "none")
+                if record["category"] == "Local" {
+                    assert_equal(has_key(request["_headers"], "Authorization"), 0)
+                } else {
+                    assert_equal(request["_headers"]["Authorization"], "Bearer key")
+                }
+                assert_equal(parse_json(request["_body"])["model"], "served-model")
+                return Ok({"_status": 200, "_body": to_json({"choices": [{"message": {"content": "Hi"}}]})})
+            }
+        })
+        assert_true(result["ok"])
+        assert_equal(result["output_text"], "Hi")
+        assert_equal(result["usage"]["usage_source"], "unavailable")
+    }
+}
+
+test "registry validates endpoint policy and explicit capability requirements" {
+    for url in ["http://example.com/v1", "http://127.0.0.1.evil.test/v1", "https://user@evil.test/v1", "https://example.com/v1?secret=1", "https://example.com\\evil.test/v1"] {
+        assert_equal(configure_provider("vllm", "model", {"base_url": url})["ok"], false)
+    }
+    assert_equal(configure_provider("moonshot", "model", {"base_url": "https://example.com/v1"})["ok"], false)
+    assert_equal(configure_provider("vllm", "model", {"enable_capabilities": ["video_generation"]})["ok"], false)
+    provider := configure_provider("vllm", "model", {"base_url": "https://example.com/v1"})["provider"]
+    assert_equal(provider["api_key_env"], "")
+    assert_equal(require_provider_capabilities(provider, ["streaming", "tool_calls"])["missing"], ["tool_calls"])
+    client := create_client(provider, "key")
+    forbidden := func(url, options) { throw "Unexpected network request" }
+    denied := chat_completion(client, [], {"endpoint_allowlist_enabled": true, "endpoint_allowlist_hosts": [], "transport": forbidden})
+    assert_equal(denied["error"]["code"], "endpoint_policy_violation")
+    unsupported := chat_completion(client, [], {"tools": [], "transport": forbidden})
+    assert_equal(unsupported["error"]["code"], "unsupported_feature")
+    unsupported := chat_completion(client, [], {"response_format": {"type": "json_schema"}, "transport": forbidden})
+    assert_equal(unsupported["error"]["code"], "unsupported_feature")
+}
+
+test "streaming preserves tool deltas and reported usage and rejects interruption" {
+    client := create_client(configure_provider("vllm", "model", {"enable_capabilities": ["tool_calls"], "stream_usage": true})["provider"], "")
+    delta := {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "call_1", "type": "function", "function": {"name": "lookup", "arguments": "{}"}}]}}]}
+    terminal := {"choices": [{"delta": {}, "finish_reason": "tool_calls"}], "usage": {"total_tokens": 9}}
+    result := chat_completion(client, [], {"stream": true, "max_retries": 0, "transport": func(url, request) {
+        assert_true(parse_json(request["_body"])["stream_options"]["include_usage"])
+        body := "data: " + to_json(delta) + "\n\ndata: " + to_json(terminal) + "\n\ndata: [DONE]\n\n"
+        return Ok({"_status": 200, "_body": body})
+    }})
+    assert_true(result["ok"])
+    assert_true(result["stream_completed"])
+    assert_equal(result["tool_calls"][0]["function"]["name"], "lookup")
+    assert_equal(result["usage"]["total_tokens"], 9)
+    result := chat_completion(client, [], {"stream": true, "max_retries": 0, "transport": func(url, request) {
+        return Ok({"_status": 200, "_body": "data: " + to_json(delta) + "\n\n"})
+    }})
+    assert_equal(result["error"]["code"], "stream_interrupted")
+}
+
+test "retrieval contracts map dialect fields and reject malformed vector batches" {
+    for id in ["voyage", "jina"] {
+        client := create_client(configure_provider(id, "embed-model", {})["provider"], "key")
+        options := {"dimensions": 2, "input_type": "document", "task": "retrieval.passage", "max_retries": 0}
+        options["transport"] = func(url, request) {
+            payload := parse_json(request["_body"])
+            if id == "voyage" {
+                assert_equal(payload["output_dimension"], 2)
+                assert_equal(payload["input_type"], "document")
+            } else {
+                assert_equal(payload["dimensions"], 2)
+                assert_equal(payload["task"], "retrieval.passage")
+            }
+            data := {"data": [{"index": 0, "embedding": [0.4, 0.8]}, {"index": 1, "embedding": [0.2, 0.9]}], "usage": {"total_tokens": 4}}
+            return Ok({"_status": 200, "_body": to_json(data)})
+        }
+        result := embeddings(client, ["first", "second"], options)
+        assert_true(result["ok"])
+        assert_equal(result["usage"]["usage_source"], "provider")
+        assert_equal(result["embeddings"][1]["vector"], [0.2, 0.9])
+        result := embeddings(client, ["first", "second"], {...options, "transport": func(url, request) {
+            return Ok({"_status": 200, "_body": to_json({"data": [{"index": 0, "embedding": [1, 2]}, {"index": 0, "embedding": [3, 4]}]})})
+        }})
+        assert_equal(result["error"]["code"], "invalid_response")
+
+        rank := rerank(client, "rank-model", "query", ["a", "b"], {"top_n": 1, "transport": func(url, request) {
+            assert_equal(request["redirects"], "none")
+            payload := parse_json(request["_body"])
+            assert_equal(payload["model"], "rank-model")
+            rows := [{"index": 1, "relevance_score": 0.5}]
+            data := {"usage": {"total_tokens": 3}}
+            if id == "voyage" { assert_equal(payload["top_k"], 1); data["data"] = rows }
+            if id == "jina" { assert_equal(payload["top_n"], 1); data["results"] = rows }
+            return Ok({"_status": 200, "_body": to_json(data)})
+        }})
+        assert_true(rank["ok"])
+        assert_equal(rank["rankings"], [{"index": 1, "score": 0.5}])
+        assert_equal(rank["usage"]["total_tokens"], 3)
+        assert_equal(chat_completion(client, [], {})["error"]["code"], "unsupported_feature")
+    }
+}
+
+test "native model management, discovery, speech and Reader endpoint contracts" {
+    studio := create_client(configure_provider("lm-studio", "model", {})["provider"], "")
+    models := discover_provider_models(studio, {"transport": func(url, request) {
+        assert_equal(url, "http://127.0.0.1:1234/v1/models")
+        assert_equal(request["method"], "GET")
+        return Ok({"_status": 200, "_body": to_json({"data": [{"id": "model"}]})})
+    }})
+    assert_equal(models["models"][0]["id"], "model")
+    loaded := lm_studio_models(studio, "load", "model", {"transport": func(url, request) {
+        assert_equal(url, "http://127.0.0.1:1234/api/v1/models/load")
+        assert_equal(parse_json(request["_body"])["model"], "model")
+        return Ok({"_status": 200, "_body": to_json({"instance_id": "instance"})})
+    }})
+    assert_equal(loaded["data"]["instance_id"], "instance")
+
+    jina := create_client(configure_provider("jina", "embed-model", {})["provider"], "")
+    read := jina_read(jina, "https://example.org/", {"transport": func(url, request) {
+        assert_equal(url, "https://r.jina.ai/")
+        assert_equal(request["_headers"]["Accept"], "application/json")
+        return Ok({"_status": 200, "_body": to_json({"data": {"content": "example"}})})
+    }})
+    assert_equal(read["content"], "example")
+
+    minimax := create_client(configure_provider("minimax", "chat-model", {})["provider"], "key")
+    speech := minimax_speech(minimax, "speech-model", "voice", "Hello", {"transport": func(url, request) {
+        assert_equal(url, "https://api.minimax.io/v1/t2a_v2")
+        assert_equal(parse_json(request["_body"])["output_format"], "hex")
+        return Ok({"_status": 200, "_body": to_json({"base_resp": {"status_code": 0}, "data": {"audio": "ABcd"}})})
+    }})
+    assert_equal(speech["audio_hex"], "ABcd")
+}
+
+test "registered presets validate full schema and required tool responses" {
+    configured := configure_provider("llama-cpp", "model", {"enable_capabilities": ["json_schema", "tool_calls"]})
+    client := create_client(configured["provider"], "")
+    fake := func(url, request) {
+        return Ok({"_status": 200, "_body": to_json({"choices": [{"message": {"content": "{\"word\":42}"}}]})})
+    }
+    schema := {"type": "object", "properties": {"word": {"type": "string"}}, "required": ["word"]}
+    result := chat_completion(client, [], {"transport": fake, "response_format": {"type": "json_schema", "json_schema": {"name": "response", "schema": schema}}})
+    assert_equal(result["error"]["code"], "structured_output_invalid")
+    result := chat_completion(client, [], {"transport": fake, "tool_choice": "required"})
+    assert_equal(result["error"]["code"], "required_tool_call_missing")
+}
+
+test "registered provider errors and attempt events omit upstream request data" {
+    client := create_client(configure_provider("moonshot", "model", {})["provider"], "fixture-key")
+    result := chat_completion(client, [], {"max_retries": 0, "transport": func(url, request) {
+        return Ok({"_status": 429, "_body": to_json({"error": {"message": "private prompt fixture-key"}})})
+    }})
+    assert_equal(result["error"]["code"], "rate_limit")
+    assert_true(result["error"]["retryable"])
+    assert_equal(result["raw"], null)
+    assert_equal(contains(to_json(result), "private prompt"), 0)
+    assert_equal(contains(to_json(result), "fixture-key"), 0)
+}
+
+test "rate-limit retry is bounded and retains the attempt count" {
+    client := create_client(configure_provider("minimax", "model", {})["provider"], "key")
+    result := chat_completion(client, [], {"max_retries": 1, "retry_delay_ms": 0, "max_retry_delay_ms": 1,
+        "transport": func(url, request) {
+            return Ok({"_status": 429, "_headers": {"Retry-After": "500"}, "_body": "{}"})
+        }})
+    assert_equal(result["error"]["code"], "rate_limit")
+    assert_equal(result["retry_after_ms"], 500000)
+    assert_equal(result["observability"]["retry_count"], 1)
+}

@@ -21,7 +21,7 @@ notes = "API contracts are designed to remain stable under semantic versioning."
 minimum_version = "1.6.0"
 entry = "examples/main.kujo"
 sources = ["src", "."]
-includes = ["README.md", "tests"]
+includes = ["README.md", "tests", "providers"]
 excludes = [".git", "kennel_packages", "dist", "build", "node_modules"]
 
 [build]
@@ -41,6 +41,8 @@ stress = "./kujo run scripts/stress_harness.kujo"
 core = "src/ai_sdk.kujo"
 providers = "src/providers.kujo"
 driver = "src/provider_driver.kujo"
+registry = "src/provider_registry.kujo"
+provider_operations = "src/provider_operations.kujo"
 openai_compatible_driver = "src/openai_compatible_driver.kujo"
 
 [package.metadata]

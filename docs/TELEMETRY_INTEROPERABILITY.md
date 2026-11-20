@@ -100,3 +100,18 @@ Use the telemetry bridge example:
 ```
 
 The example emits OpenTelemetry-style JSON payloads for start, retry, and completion hook events and demonstrates retry behavior with an injected flaky transport.
+
+## Registry presets
+
+The registered chat and embedding clients add provider, model, sanitized host,
+usage availability and streaming completion to the request-completion event.
+The retry hook remains the attempt-history surface. Use the caller's trace ID
+to correlate attempts with the orchestrator or RunLedger receipt. A workflow
+that selects a fallback should retain each attempt event with its provider
+identity. Projects can pass terminal normalized results to
+`watchdog_model_event` for Watchdog delivery through their existing exporter.
+
+Usage marked `unavailable` reports no known provider count. The SDK keeps
+legacy numeric compatibility fields and can estimate usage for budget policy
+when configured. A budget estimate cannot establish a billable amount.
+Native model management, Reader and speech are explicit operations.
