@@ -2,7 +2,7 @@
 
 ## Driver trust boundary
 
-Treat external driver packages as executable dependencies. Review and pin them and run conformance/security tests. Core validates host/scheme, protected headers, control characters, credential placement, descriptor shape, response size, semantic results, and retry policy. Drivers cannot select transport or perform I/O. Query authentication and signing remain future work; current descriptors reject query strings.
+Treat external driver packages as executable dependencies. Review and pin them and run conformance/security tests. Core validates host/scheme, protected headers, control characters, credential placement, descriptor shape, response size, semantic results, and retry policy. Drivers cannot select transport or perform I/O. A trusted package can declare one fixed, non-secret `static_stream_query` key/value pair for streaming chat descriptors. The SDK checks the exact declaration and same origin.
 
 ## State enforcement limits
 
@@ -133,7 +133,7 @@ Escalate to incident response when any condition persists for 10+ minutes:
 
 ## Native transport controls
 
-Set `max_raw_response_bytes` to a positive integer to enforce a native download cap before parsing (the runtime ceiling remains 8 MiB). Endpoint allowlist mode disables redirect following. Without an allowlist, `redirects` defaults to `follow`; use `none` to reject redirects explicitly. These controls work on published Kujo 1.5 and 1.6. Injected transports must enforce the forwarded limits themselves.
+Set `max_raw_response_bytes` to a positive integer to enforce a native download cap before parsing (the runtime ceiling remains 8 MiB). Endpoint allowlists, registered and package providers, and custom credential headers disable redirect following. Otherwise `redirects` defaults to `follow`. Use `none` to reject redirects explicitly. These controls work on published Kujo 1.5 and 1.6. Injected transports must enforce the forwarded limits themselves.
 
 Use `on_transport_chunk(event)` only with the native transport and a runtime containing `http_stream_collect` / `response_stream: "collect"`. The source backports add that API to 1.5 and 1.6; published immutable binaries have not changed. Unpatched binaries reject this option before I/O. The callback receives UTF-8-safe transport text fragments, which may split SSE records. Returning false or throwing cancels the request; transport and final structured-output failures are terminal to avoid replaying already-observed text. Existing normalized stream callbacks still run after the complete response. Account for partial delivery and unknown provider billing after cancellation; collection retains the bounded final body.
 

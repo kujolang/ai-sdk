@@ -464,9 +464,24 @@ func runtime_transport(url, options) {
  })
 }
 
-func transport_options(request_options, resolved_options) {
+func custom_request_credentials(headers, credential) {
+    if type(headers) != "dict" { return false }
+    for name in keys(headers) {
+        normalized := lower(name)
+        # Ordinary bearer authorization keeps the runtime's standard redirect
+        # behavior. Custom credential headers may be forwarded unchanged.
+        if normalized == "authorization" || normalized == "content-type" { continue }
+        value := headers[name]
+        if type(value) != "string" || value == "" { continue }
+        if is_sensitive_key_name(normalized) { return true }
+        if type(credential) == "string" && credential != "" && contains(value,credential) == 1 { return true }
+    }
+    return false
+}
+
+func transport_options(request_options, resolved_options, credential) {
  redirects := dict_get_or(resolved_options, "redirects", "follow")
- if dict_get_or(resolved_options, "endpoint_allowlist_enabled", false) { redirects = "none" }
+ if dict_get_or(resolved_options, "endpoint_allowlist_enabled", false) || custom_request_credentials(request_options["_headers"],credential) { redirects = "none" }
  request_options["redirects"] = redirects
  limit := dict_get_or(resolved_options, "max_raw_response_bytes", 0)
  if type(limit) == "int" && limit > 0 {
@@ -588,11 +603,8 @@ func is_sensitive_key_name(key_name) {
 	if key_name == "delta" || key_name == "function" || key_name == "name" || key_name == "arguments" || key_name == "tool_calls" {
 		return false
 	}
-	normalized_key := lower(key_name)
-	if is_non_secret_token_count_key(normalized_key) {
-		return false
-	}
-	if normalized_key == "authorization" {
+	normalized_key := replace(lower(key_name),"-","_")
+	if normalized_key == "authorization" || normalized_key == "proxy_authorization" || normalized_key == "cookie" || normalized_key == "set_cookie" {
 		return true
 	}
 	if normalized_key == "api_key" || normalized_key == "apikey" || normalized_key == "x-api-key" {
@@ -631,20 +643,25 @@ func is_sensitive_key_name(key_name) {
 	return false
 }
 
-func is_non_secret_token_count_key(key_name) {
-	if key_name == "input_tokens" || key_name == "output_tokens" || key_name == "total_tokens" {
-		return true
-	}
-	if key_name == "prompt_tokens" || key_name == "completion_tokens" {
-		return true
-	}
-	if key_name == "planned_tokens" || key_name == "used_tokens" || key_name == "request_tokens" || key_name == "projected_tokens" {
-		return true
-	}
-	if key_name == "max_total_tokens_per_request" || key_name == "rolling_token_budget_tokens" {
-		return true
-	}
-	return false
+func safe_accounting_value(key_name, value) {
+    name := lower(key_name)
+    if name == "prompt_tokens_details" || name == "completion_tokens_details" || name == "output_tokens_details" {
+        return type(value) == "dict"
+    }
+    if name == "prompttokensdetails" || name == "cachetokensdetails" || name == "candidatestokensdetails" || name == "tooluseprompttokensdetails" {
+        return type(value) == "array"
+    }
+    if type(value) != "null" && (type(value) != "int" || value < 0) { return false }
+    return has_key({
+        "input_tokens":true,"output_tokens":true,"total_tokens":true,
+        "prompt_tokens":true,"completion_tokens":true,"cached_tokens":true,
+        "cached_input_tokens":true,"cache_write_input_tokens":true,"cache_creation_input_tokens":true,
+        "reasoning_tokens":true,"prompt_cache_hit_tokens":true,"prompt_cache_miss_tokens":true,
+        "planned_tokens":true,"used_tokens":true,"request_tokens":true,"projected_tokens":true,
+        "max_total_tokens_per_request":true,"rolling_token_budget_tokens":true,
+        "prompttokencount":true,"candidatestokencount":true,"totaltokencount":true,
+        "cachedcontenttokencount":true,"thoughtstokencount":true,"tooluseprompttokencount":true,"tokencount":true,
+    },name) == 1
 }
 
 func redact_sensitive_string(value) {
@@ -665,57 +682,55 @@ func redact_sensitive_string(value) {
 	return value
 }
 
-func redact_sensitive_payload(raw_value) {
-	if type(raw_value) == "dict" {
-		redacted := {}
-		for key in keys(raw_value) {
-			if is_sensitive_key_name(key) {
-				redacted[key] := "[REDACTED]"
-			} else {
-				redacted[key] := redact_sensitive_payload(raw_value[key])
-			}
-		}
-		return redacted
-	}
-
-	if type(raw_value) == "array" {
-		redacted_items := []
-		for raw_item in raw_value {
-			redacted_items = push(redacted_items, redact_sensitive_payload(raw_item))
-		}
-		return redacted_items
-	}
-
-	if type(raw_value) == "string" {
-		return redact_sensitive_string(raw_value)
-	}
-
-	return raw_value
+func secret_literal(value, credential) {
+    if credential == "" { return value }
+    safe := value
+    if contains(value,credential) == 1 { safe = replace(value,credential,"[REDACTED]") }
+    if contains(safe,"\\") == 1 {
+        quoted := to_json(credential)
+        escaped := substring(quoted,1,len(quoted)-1)
+        if escaped != credential && contains(safe,escaped) == 1 { safe = replace(safe,escaped,"[REDACTED]") }
+    }
+    return safe
 }
 
-# Error diagnostics may echo credentials even when their field names are harmless.
-func redact_known_credential(value, credential) {
- if type(value) == "string" { return replace(value, credential, "[REDACTED]") }
- if type(value) == "dict" {
-  redacted := {}
-  for key in keys(value) { redacted[key] = redact_known_credential(value[key], credential) }
-  return redacted
- }
- if type(value) == "array" {
-  redacted_items := []
-  for item in value { redacted_items = push(redacted_items, redact_known_credential(item, credential)) }
-  return redacted_items
- }
- return value
+// Diagnostics are recursively scrubbed. API result content can retain
+// non-secret text and tool arguments while still removing the configured key.
+func scrub_response_value(value, credential, diagnostics) {
+    if type(value) == "dict" {
+        redacted := {}
+        for key in keys(value) {
+            name := secret_literal(key,credential)
+            entry := value[key]
+            if diagnostics && is_sensitive_key_name(key) && !safe_accounting_value(key,entry) {
+                redacted[name] := "[REDACTED]"
+            } else { redacted[name] := scrub_response_value(entry,credential,diagnostics) }
+        }
+        return redacted
+    }
+    if type(value) == "array" {
+        items := []
+        for item in value { items = push(items,scrub_response_value(item,credential,diagnostics)) }
+        return items
+    }
+    if type(value) == "string" {
+        if diagnostics { value = redact_sensitive_string(value) }
+        return secret_literal(value,credential)
+    }
+    return value
 }
 
 func redact_error_diagnostic(client, value) {
- redacted := redact_sensitive_payload(value)
- credential := dict_get_or(client, "api_key", "")
- if type(credential) == "string" && credential != "" {
-  return redact_known_credential(redacted, credential)
- }
- return redacted
+    credential := dict_get_or(client,"api_key","")
+    if type(credential) != "string" { credential = "" }
+    return scrub_response_value(value,credential,true)
+}
+
+func redact_success_value(client,value,diagnostics) {
+    credential := dict_get_or(client,"api_key","")
+    if type(credential) != "string" || len(credential) < 4 { credential = "" }
+    if !diagnostics && credential == "" { return value }
+    return scrub_response_value(value,credential,diagnostics)
 }
 
 func standard_error_response_impl(client, error_code, message, status_code, raw, retryable) {
@@ -1032,16 +1047,21 @@ func normalize_success_response(client, status_code, data, fallback_model) {
 		"ok": true,
 		"provider": client["provider"]["name"],
 		"contract_version": contract_version_value(),
-		"request_id": request_id,
-		"model": model,
-		"output_text": output_text,
-		"finish_reason": finish_reason,
-		"tool_calls": tool_calls,
-		"usage": usage,
+		"request_id": redact_success_value(client,request_id,false),
+		"model": redact_success_value(client,model,false),
+		"output_text": redact_success_value(client,output_text,false),
+		"finish_reason": redact_success_value(client,finish_reason,false),
+		"tool_calls": redact_success_value(client,tool_calls,false),
+		"usage": redact_success_value(client,usage,false),
 		"status_code": status_code,
 		"normalized_at": current_timestamp(),
-		"raw": redact_sensitive_payload(data)
+		"raw": redact_success_value(client,data,true)
 	}
+}
+
+func nonnegative_count(value) {
+    if type(value) == "int" && value >= 0 { return value }
+    return null
 }
 
 func normalize_usage_fields(raw_usage, defaults) {
@@ -1061,39 +1081,36 @@ func normalize_usage_fields(raw_usage, defaults) {
 		return usage
 	}
 
-	has_input := has_key(raw_usage, "prompt_tokens") || has_key(raw_usage, "input_tokens")
-	has_output := has_key(raw_usage, "completion_tokens") || has_key(raw_usage, "output_tokens")
-	has_total := has_key(raw_usage, "total_tokens")
+	input := nonnegative_count(dict_get_or(raw_usage,"prompt_tokens",dict_get_or(raw_usage,"input_tokens",null)))
+	output := nonnegative_count(dict_get_or(raw_usage,"completion_tokens",dict_get_or(raw_usage,"output_tokens",null)))
+	total := nonnegative_count(dict_get_or(raw_usage,"total_tokens",null))
 
-	if has_input {
-		usage["input_tokens"] := dict_get_or(raw_usage, "prompt_tokens", dict_get_or(raw_usage, "input_tokens", usage["input_tokens"]))
-	}
-	if has_output {
-		usage["output_tokens"] := dict_get_or(raw_usage, "completion_tokens", dict_get_or(raw_usage, "output_tokens", usage["output_tokens"]))
-	}
-	if has_total {
-		usage["total_tokens"] := dict_get_or(raw_usage, "total_tokens", usage["total_tokens"])
-	} else {
+	if input != null { usage["input_tokens"] := input }
+	if output != null { usage["output_tokens"] := output }
+	if total != null { usage["total_tokens"] := total } else {
 		usage["total_tokens"] := usage["input_tokens"] + usage["output_tokens"]
 		usage["total_semantics"] := "input_plus_output"
 	}
 
-	cached := dict_get_or(raw_usage, "cached_tokens", dict_get_or(raw_usage, "cached_input_tokens", null))
+	cached := dict_get_or(raw_usage, "cached_tokens", dict_get_or(raw_usage, "cached_input_tokens", dict_get_or(raw_usage,"prompt_cache_hit_tokens",null)))
 	prompt_details := dict_get_or(raw_usage, "prompt_tokens_details", null)
 	if type(prompt_details) == "dict" { cached = dict_get_or(prompt_details, "cached_tokens", cached) }
 	completion_details := dict_get_or(raw_usage, "completion_tokens_details", null)
 	reasoning := dict_get_or(raw_usage, "reasoning_tokens", null)
 	if type(completion_details) == "dict" { reasoning = dict_get_or(completion_details, "reasoning_tokens", reasoning) }
 	cache_write := dict_get_or(raw_usage, "cache_write_input_tokens", dict_get_or(raw_usage, "cache_creation_input_tokens", null))
+cached = nonnegative_count(cached)
+	reasoning = nonnegative_count(reasoning)
+	cache_write = nonnegative_count(cache_write)
 	usage["cached_input_tokens"] := cached
 	usage["cache_write_input_tokens"] := cache_write
 	usage["reasoning_tokens"] := reasoning
 	usage["provider_usage"] := {
-		"prompt_tokens": dict_get_or(raw_usage, "prompt_tokens", null),
-		"completion_tokens": dict_get_or(raw_usage, "completion_tokens", null),
-		"input_tokens": dict_get_or(raw_usage, "input_tokens", null),
-		"output_tokens": dict_get_or(raw_usage, "output_tokens", null),
-		"total_tokens": dict_get_or(raw_usage, "total_tokens", null),
+		"prompt_tokens": nonnegative_count(dict_get_or(raw_usage, "prompt_tokens", null)),
+		"completion_tokens": nonnegative_count(dict_get_or(raw_usage, "completion_tokens", null)),
+		"input_tokens": nonnegative_count(dict_get_or(raw_usage, "input_tokens", null)),
+		"output_tokens": nonnegative_count(dict_get_or(raw_usage, "output_tokens", null)),
+		"total_tokens": nonnegative_count(dict_get_or(raw_usage, "total_tokens", null)),
 		"cached_tokens": cached,
 		"cache_write_input_tokens": cache_write,
 		"reasoning_tokens": reasoning
@@ -1544,29 +1561,35 @@ func normalize_stream_success_response(client, status_code, stream_events, fallb
 		finish_reason := "stop"
 	}
 
-	i := 0
-	while i < len(stream_events) {
-		stream_events[i] = redact_sensitive_payload(stream_events[i])
-		i := i + 1
-	}
+    safe_text := redact_success_value(client,output_text,false)
+    safe_calls := redact_success_value(client,tool_calls,false)
+    if safe_text != output_text || safe_calls != tool_calls {
+        stream_events = []
+    } else {
+        i := 0
+        while i < len(stream_events) {
+            stream_events[i] = redact_success_value(client,stream_events[i],true)
+            i = i + 1
+        }
+    }
 
 	raw := {
 		"stream_mode": true,
 		"stream_events": stream_events,
-		"model": model,
-		"id": request_id
+		"model": redact_success_value(client,model,false),
+		"id": redact_success_value(client,request_id,false)
 	}
 
 	return {
 		"ok": true,
 		"provider": client["provider"]["name"],
 		"contract_version": contract_version_value(),
-		"request_id": request_id,
-		"model": model,
-		"output_text": output_text,
-		"finish_reason": finish_reason,
-		"tool_calls": tool_calls,
-		"usage": usage,
+		"request_id": redact_success_value(client,request_id,false),
+		"model": redact_success_value(client,model,false),
+		"output_text": safe_text,
+		"finish_reason": redact_success_value(client,finish_reason,false),
+		"tool_calls": safe_calls,
+		"usage": redact_success_value(client,usage,false),
 		"status_code": status_code,
 		"normalized_at": current_timestamp(),
 		"raw": raw
@@ -1819,15 +1842,15 @@ func normalize_embeddings_success_response(client, status_code, data, fallback_m
 		"ok": true,
 		"provider": client["provider"]["name"],
 		"contract_version": contract_version_value(),
-		"model": model,
-		"embeddings": embeddings,
+		"model": redact_success_value(client,model,false),
+		"embeddings": redact_success_value(client,embeddings,false),
 		"usage": {
-			"input_tokens": input_tokens,
-			"total_tokens": total_tokens
+			"input_tokens": redact_success_value(client,input_tokens,false),
+			"total_tokens": redact_success_value(client,total_tokens,false)
 		},
 		"status_code": status_code,
 		"normalized_at": current_timestamp(),
-		"raw": redact_sensitive_payload(data)
+		"raw": redact_success_value(client,data,true)
 	}
 }
 
@@ -1859,12 +1882,22 @@ func driver_origin(url) {
     return lower(parts[0] + "//" + parts[2])
 }
 
+func allowed_driver_query(provider, descriptor, url, operation) {
+    if contains(url,"?") == 0 { return true }
+    if operation != "chat" || dict_get_or(descriptor,"stream_mode",false) != true || !dict_get_or(provider,"package_provider",false) { return false }
+    parts := split(url,"?")
+    declared := dict_get_or(provider,"static_stream_query","")
+    if len(parts) != 2 || type(declared) != "string" || parts[1] != declared { return false }
+    if !regex_match(declared,"^[A-Za-z][A-Za-z0-9_-]{0,31}=[A-Za-z0-9][A-Za-z0-9_-]{0,63}$") { return false }
+    return !is_sensitive_key_name(split(declared,"=")[0])
+}
+
 func validate_driver_descriptor(client, descriptor, operation) {
 	if type(descriptor) != "dict" { return {"ok": false, "code": "config_error", "message": "Provider driver request descriptor must be a dict."} }
 	url := dict_get_or(descriptor, "url", "")
 	if type(url) != "string" || url == "" { return {"ok": false, "code": "config_error", "message": "Provider driver request descriptor requires a URL."} }
-	if contains(url, "@") || contains(url, "?") || contains(url, "#") { return {"ok": false, "code": "endpoint_policy_violation", "message": "Provider driver URL contains forbidden credentials, query, or fragment data."} }
     provider := client["provider"]
+	if contains(url, "@") || contains(url, "#") || !allowed_driver_query(provider,descriptor,url,operation) { return {"ok": false, "code": "endpoint_policy_violation", "message": "Provider driver URL contains forbidden credentials, query, or fragment data."} }
     if dict_get_or(provider, "package_provider", false) && driver_origin(url) != driver_origin(provider["base_url"]) {
         return {"ok": false, "code": "endpoint_policy_violation", "message": "Provider driver must use the configured scheme, host, and port."}
     }
@@ -1879,7 +1912,7 @@ func validate_driver_descriptor(client, descriptor, operation) {
 	for name in keys(descriptor["headers"]) { if header_entry_has_injection_risk(name, descriptor["headers"][name]) { return {"ok": false, "code": "config_error", "message": "Provider driver headers contain control characters."} } }
 	credential := client["api_key"]
 	if type(credential) == "string" && len(credential) > 3 {
-		if contains(url, credential) || contains(descriptor["body"], credential) { return {"ok": false, "code": "endpoint_policy_violation", "message": "Provider driver exposed credentials outside protected headers."} }
+		if contains(url, credential) || secret_literal(descriptor["body"],credential) != descriptor["body"] { return {"ok": false, "code": "endpoint_policy_violation", "message": "Provider driver exposed credentials outside protected headers."} }
 		for name in keys(descriptor["headers"]) { value := descriptor["headers"][name]; if type(value) == "string" && contains(value, credential) && !contains_ci(protected, name) && !is_protected_header_name(name) { return {"ok": false, "code": "endpoint_policy_violation", "message": "Provider driver placed credentials in an unprotected header."} } }
 	}
 	return {"ok": true}
@@ -1945,13 +1978,37 @@ func build_driver_request_context(client, payload, options, resolved_options, op
 func build_embeddings_request_context(client, payload, options, resolved_options) { return build_driver_request_context(client, payload, options, resolved_options, "embeddings", [], dict_get_or(payload, "input", null)) }
 
 func semantic_chat_result(client, status_code, value) {
-	if type(value) != "dict" || !dict_get_or(value, "ok", false) || type(dict_get_or(value, "output_text", null)) != "string" || type(dict_get_or(value, "tool_calls", null)) != "array" || type(dict_get_or(value, "usage", null)) != "dict" { return standard_error_response_impl(client, "invalid_response", "Provider driver returned a malformed chat semantic result.", status_code, null, false) }
-	return {"ok": true, "provider": client["provider"]["name"], "contract_version": contract_version_value(), "request_id": dict_get_or(value, "request_id", ""), "model": dict_get_or(value, "model", client["provider"]["default_model"]), "output_text": value["output_text"], "finish_reason": dict_get_or(value, "finish_reason", ""), "tool_calls": value["tool_calls"], "usage": value["usage"], "status_code": status_code, "normalized_at": current_timestamp(), "raw": redact_sensitive_payload(dict_get_or(value, "raw_provider", null))}
+    if type(value) != "dict" || !dict_get_or(value,"ok",false) || type(dict_get_or(value,"output_text",null)) != "string" || type(dict_get_or(value,"tool_calls",null)) != "array" || type(dict_get_or(value,"usage",null)) != "dict" {
+        return standard_error_response_impl(client,"invalid_response","Provider driver returned a malformed chat semantic result.",status_code,null,false)
+    }
+    text := redact_success_value(client,value["output_text"],false)
+    calls := redact_success_value(client,value["tool_calls"],false)
+    raw := redact_success_value(client,dict_get_or(value,"raw_provider",null),true)
+    if type(raw) == "dict" && has_key(raw,"stream_events") && (text != value["output_text"] || calls != value["tool_calls"]) {
+        raw["stream_events"] = []
+    }
+    return {
+        "ok":true, "provider":client["provider"]["name"], "contract_version":contract_version_value(),
+        "request_id":redact_success_value(client,dict_get_or(value,"request_id",""),false),
+        "model":redact_success_value(client,dict_get_or(value,"model",client["provider"]["default_model"]),false),
+        "output_text":text, "finish_reason":redact_success_value(client,dict_get_or(value,"finish_reason",""),false),
+        "tool_calls":calls, "usage":redact_success_value(client,value["usage"],false),
+        "status_code":status_code, "normalized_at":current_timestamp(), "raw":raw
+    }
 }
 
 func semantic_embeddings_result(client, status_code, value) {
-	if type(value) != "dict" || !dict_get_or(value, "ok", false) || type(dict_get_or(value, "embeddings", null)) != "array" || type(dict_get_or(value, "usage", null)) != "dict" { return standard_error_response_impl(client, "invalid_response", "Provider driver returned a malformed embeddings semantic result.", status_code, null, false) }
-	return {"ok": true, "provider": client["provider"]["name"], "contract_version": contract_version_value(), "model": dict_get_or(value, "model", client["provider"]["default_model"]), "embeddings": value["embeddings"], "usage": value["usage"], "status_code": status_code, "normalized_at": current_timestamp(), "raw": redact_sensitive_payload(dict_get_or(value, "raw_provider", null))}
+    if type(value) != "dict" || !dict_get_or(value,"ok",false) || type(dict_get_or(value,"embeddings",null)) != "array" || type(dict_get_or(value,"usage",null)) != "dict" {
+        return standard_error_response_impl(client,"invalid_response","Provider driver returned a malformed embeddings semantic result.",status_code,null,false)
+    }
+    return {
+        "ok":true, "provider":client["provider"]["name"], "contract_version":contract_version_value(),
+        "model":redact_success_value(client,dict_get_or(value,"model",client["provider"]["default_model"]),false),
+        "embeddings":redact_success_value(client,value["embeddings"],false),
+        "usage":redact_success_value(client,value["usage"],false),
+        "status_code":status_code, "normalized_at":current_timestamp(),
+        "raw":redact_success_value(client,dict_get_or(value,"raw_provider",null),true)
+    }
 }
 
 func driver_error_result(client, status_code, response, body_text) {
@@ -2032,7 +2089,7 @@ func execute_embeddings_request_once(client, payload, resolved_options, attempt,
 	}
 	request_options["_headers"] := request_context["headers"]
 	request_options["_body"] := request_context["body"]
-	request_options = transport_options(request_options, resolved_options)
+	request_options = transport_options(request_options,resolved_options,dict_get_or(client,"api_key",""))
 
  http_result := null
  transport_threw := false
@@ -3163,7 +3220,7 @@ func execute_request_once(client, messages, options, resolved_options, payload, 
 	}
 	request_options["_headers"] := request_context["headers"]
 	request_options["_body"] := request_context["body"]
-	request_options = transport_options(request_options, resolved_options)
+	request_options = transport_options(request_options,resolved_options,dict_get_or(client,"api_key",""))
 
  http_result := null
  transport_threw := false
@@ -4050,7 +4107,7 @@ export func execute_provider_operation(client, operation, base_url, path, method
     transport := resolve_transport_with_resolved(client, resolved)
     response := null
     result := standard_error_response_impl(client, "transport_error", "Provider operation transport failed.", 0, null, false)
-    try { response = transport(url, transport_options(request, {...resolved, "on_transport_chunk": null})) } except err { response = null }
+    try { response = transport(url, transport_options(request,{...resolved,"on_transport_chunk":null},credential)) } except err { response = null }
     match response {
         case Ok(value): {
             status := dict_get_or(value, "_status", dict_get_or(value, "status", 0))
@@ -4069,7 +4126,7 @@ export func execute_provider_operation(client, operation, base_url, path, method
                 if type(data) != "dict" || has_key(data, "error") {
                     result = standard_error_response_impl(client, "invalid_response", "Provider operation did not return a successful JSON object.", status, null, false)
                 } else {
-                    result = {"ok": true, "provider": client["provider"]["name"], "status_code": status, "data": data}
+                    result = {"ok": true, "provider": client["provider"]["name"], "status_code": status, "data": redact_success_value(client,data,false)}
                 }
             }
         }

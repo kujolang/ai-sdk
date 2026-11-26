@@ -57,3 +57,15 @@ test "injected UTF-8 bodies and chunks respect the wire byte limit" {
  options["max_raw_response_bytes"] = byte_length(chunk)
  assert_equal(chat_completion_stream(client, [], options, null)["output_text"], "é")
 }
+
+test "credential carrying extension headers disable redirects in chat and embeddings" {
+    client := create_client(openai_provider(),"fixture-key")
+    transport := func(url, request) {
+        assert_equal(request["redirects"],"none")
+        return Err("fixture transport reached")
+    }
+    options := {"headers":{"x-goog-api-key":"configured-header"},"redirects":"follow","transport":transport,"max_retries":0}
+    assert_equal(chat_completion(client,[],options)["error"]["code"],"network_error")
+    options["headers"] = {"x-tenant-routing":"fixture-key"}
+    assert_equal(embeddings(client,"fixture text",options)["error"]["code"],"network_error")
+}

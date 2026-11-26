@@ -1,6 +1,6 @@
 test_setup {
 	from src.providers import openai_provider
-	from src.ai_sdk import create_client, standard_error_response, normalize_provider_error
+	from src.ai_sdk import create_client, standard_error_response, normalize_provider_error, chat_completion, chat_completion_stream
 }
 
 test "raw payloads redact expanded sensitive aliases and nested credentials" {
@@ -80,4 +80,46 @@ test "redaction preserves token count budget fields while hiding credential toke
 	assert_equal(error_result["raw"]["projected_tokens"], 12)
 	assert_equal(error_result["raw"]["rolling_token_budget_tokens"], 10)
 	assert_equal(error_result["raw"]["access_token"], "[REDACTED]")
+}
+
+test "response diagnostics retain numeric accounting and scrub configured literals" {
+    key := "fixture:\"\\key"
+    client := create_client(openai_provider(),key)
+    body := {
+        "choices":[{"message":{"content":"echo " + key}}],
+        "usage":{
+            "prompt_tokens":4,
+            "prompt_cache_hit_tokens":2,
+            "prompt_cache_miss_tokens":"invalid count",
+            "output_tokens_details":{"reasoning_tokens":1},
+            "completion_tokens_details":{"reasoning_tokens":1,"x-goog-api-key":"private header fixture"}
+        },
+    }
+    body[key] := "unstructured fixture"
+    result := chat_completion(client,[],{"transport":func(url, options) { return Ok({"_status":200,"_body":to_json(body)}) },"max_retries":0})
+    assert_true(result["ok"])
+    assert_equal(result["output_text"],"echo [REDACTED]")
+    assert_equal(result["usage"]["cached_input_tokens"],2)
+    assert_equal(result["raw"]["usage"]["prompt_cache_hit_tokens"],2)
+    assert_equal(result["raw"]["usage"]["prompt_cache_miss_tokens"],"[REDACTED]")
+    assert_equal(result["raw"]["usage"]["output_tokens_details"]["reasoning_tokens"],1)
+    assert_equal(result["raw"]["usage"]["completion_tokens_details"]["x-goog-api-key"],"[REDACTED]")
+    assert_equal(has_key(result["raw"],key),0)
+    assert_equal(result["raw"]["[REDACTED]"],"unstructured fixture")
+    error := standard_error_response(client,"provider_error","fixture",400,{"body":to_json({"message":key})},false)
+    assert_equal(parse_json(error["raw"]["body"])["message"],"[REDACTED]")
+}
+
+test "adjacent stream fragments cannot reassemble a credential from retained diagnostics" {
+    client := create_client(openai_provider(),"fixture-key")
+    transport := func(url, options) {
+        return Ok({"_status":200,"_stream_chunks":[
+            "data: {\"choices\":[{\"delta\":{\"content\":\"echo fixture-\"}}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"key\"},\"finish_reason\":\"stop\"}]}\n\n",
+            "data: [DONE]\n\n"
+        ]})
+    }
+    result := chat_completion_stream(client,[],{"transport":transport,"max_retries":0},null)
+    assert_equal(result["output_text"],"echo [REDACTED]")
+    assert_equal(result["raw"]["stream_events"],[])
 }

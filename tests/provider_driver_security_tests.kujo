@@ -7,3 +7,22 @@ test "driver exceptions and malformed semantic results are contained" { for mode
 test "invalid and throwing driver metadata fail configuration" { for mode in ["bad_metadata","throw_metadata"] { client:=create_client(security_provider(mode),"key"); assert_true(client["config_error"]!="") } }
 test "oversized bodies and chunks remain core enforced" { p:=security_provider("normal"); body:=chat_completion(create_client(p,"key"),[create_message("user","x")],{"transport":func(u,o){return Ok({"_status":200,"_body":"this is much too large"})},"max_raw_response_bytes":4,"max_retries":0}); assert_equal(body["error"]["code"],"response_too_large"); stream:=chat_completion_stream(create_client(p,"key"),[create_message("user","x")],{"transport":func(u,o){return Ok({"_status":200,"_stream_chunks":["piece|this is too large\n"]})},"max_raw_response_bytes":4,"max_retries":0},null); assert_equal(stream["error"]["code"],"response_too_large") }
 test "retry hints cannot amplify terminal failures" { r:=chat_completion(create_client(security_provider("normal"),"key"),[create_message("user","x")],{"transport":func(u,o){return Ok({"_status":400,"_body":"{\"failure\":{\"reason\":\"bad\",\"code\":\"BAD\"}}"})},"max_retries":3}); assert_false(r["error"]["retryable"]); assert_equal(r["status_code"],400); assert_equal(r["observability"]["start_count"],1) }
+
+test "a package stream may use its declared fixed format selector" {
+    provider := security_provider("static_stream_query")
+    provider["package_provider"] = true
+    provider["static_stream_query"] = "format=events"
+    transport := func(url, options) {
+        assert_equal(url,"https://fictional.invalid/v1/conversation?format=events")
+        assert_equal(options["redirects"],"none")
+        return Err("fixture transport reached")
+    }
+    client := create_client(provider,"fixture-key")
+    options := {"transport":transport,"max_retries":0}
+    stream := chat_completion_stream(client,[create_message("user","hello")],options,null)
+    assert_equal(stream["error"]["code"],"network_error")
+    assert_equal(chat_completion(client,[],options)["error"]["code"],"endpoint_policy_violation")
+    provider["static_stream_query"] = "format=json"
+    rejected := chat_completion_stream(create_client(provider,"fixture-key"),[],options,null)
+    assert_equal(rejected["error"]["code"],"endpoint_policy_violation")
+}
