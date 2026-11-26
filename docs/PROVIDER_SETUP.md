@@ -162,7 +162,9 @@ to the selected model.
 `jina_read`, `minimax_speech`, and `lm_studio_models` are explicit operations
 in `provider_operations`. Reader sends a public URL to Jina. Speech returns
 hex MP3 bytes. LM Studio REST v1 manages model keys and loaded instance IDs.
-Only invoke load or unload in code that owns the server lifecycle.
+Only invoke load or unload in code that owns the server lifecycle. Pass an
+explicit fixture as `options.transport` when using `offline_fixture` for these
+operations. The SDK will not fall back to a configured client transport.
 
 ## Troubleshooting
 

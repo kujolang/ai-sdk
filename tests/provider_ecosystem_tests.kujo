@@ -195,3 +195,34 @@ test "rate-limit response returns without retry if the provider delay exceeds th
     assert_equal(result["retry_after_ms"], 500000)
     assert_equal(result["observability"]["retry_count"], 0)
 }
+
+test "offline provider operations require an explicit fixture transport" {
+    studio := create_client(configure_provider("lm-studio", "model", {})["provider"], "")
+    fixture := func(url, request) {
+        return Ok({"_status": 200, "_body": to_json({"data": [{"id": "fixture-model"}]})})
+    }
+    # A configured fallback transport can be live even when the call requests a fixture.
+    studio["transport"] = fixture
+    blocked := discover_provider_models(studio, {"offline_fixture": true})
+    assert_equal(blocked["error"]["code"], "unsupported_feature")
+    allowed := discover_provider_models(studio, {"offline_fixture": true, "transport": fixture})
+    assert_equal(allowed["models"][0]["id"], "fixture-model")
+}
+
+test "provider operations check the deadline after request-start hooks" {
+    studio := create_client(configure_provider("lm-studio", "model", {})["provider"], "")
+    result := discover_provider_models(studio, {
+        "overall_timeout_ms": 20,
+        "on_request_start": func(event) { sleep(60) },
+        "transport": func(url, request) { throw "fixture transport should not run after the deadline" }
+    })
+    assert_equal(result["error"]["code"], "deadline_exceeded")
+}
+
+test "provider operations bound serialized UTF-8 request bytes" {
+    jina := create_client(configure_provider("jina", "rerank-model", {})["provider"], "key")
+    result := rerank(jina, "rerank-model", "query", [repeat("é", 530000)], {
+        "transport": func(url, request) { throw "fixture transport should not receive an oversized body" }
+    })
+    assert_equal(result["error"]["code"], "request_too_large")
+}

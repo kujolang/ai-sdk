@@ -3979,6 +3979,9 @@ export func execute_provider_operation(client, operation, base_url, path, method
         return standard_error_response_impl(client, "config_error", "Expected a configured registry client.", 0, null, false)
     }
     resolved := resolve_chat_options(client, options)
+    if resolved["offline_fixture"] && type(resolved["transport"]) != "function" {
+        return standard_error_response_impl(client, "unsupported_feature", "Offline provider operations require an explicit fixture transport.", 0, null, false)
+    }
     target := {...client, "provider": {...client["provider"], "base_url": base_url}}
     provider := client["provider"]
     fixed := base_url == provider["base_url"] && (
@@ -4012,11 +4015,7 @@ export func execute_provider_operation(client, operation, base_url, path, method
     started_at := current_timestamp()
     deadline := resolve_request_deadline_ms(resolved, started_at)
     request := {"method": method, "_headers": headers, "timeout": resolved["timeout"]}
-    if deadline > 0 {
-        remaining := deadline - started_at
-        if remaining <= 0 { return deadline_exceeded_response(client, deadline, started_at) }
-        if remaining / 1000.0 < request["timeout"] { request["timeout"] = remaining / 1000.0 }
-    }
+    if deadline > 0 && deadline <= started_at { return deadline_exceeded_response(client, deadline, started_at) }
     if resolved["connect_timeout"] > 0 { request["connect_timeout"] = resolved["connect_timeout"] }
     if resolved["read_timeout"] > 0 { request["read_timeout"] = resolved["read_timeout"] }
     if method == "POST" {
@@ -4039,6 +4038,15 @@ export func execute_provider_operation(client, operation, base_url, path, method
         "host": provider_host_from_base_url(base_url), "attempt": 0, "started_at": started_at,
         "trace_id": trace_id, "request_id": request_id
     })
+    if deadline > 0 {
+        now_ms := current_timestamp()
+        remaining := deadline - now_ms
+        if remaining <= 0 {
+            return finalize_request_result(deadline_exceeded_response(client, deadline, now_ms), resolved, 0, started_at, trace_id, request_id)
+        }
+        remaining_seconds := remaining / 1000.0
+        if remaining_seconds < request["timeout"] { request["timeout"] = remaining_seconds }
+    }
     transport := resolve_transport_with_resolved(client, resolved)
     response := null
     result := standard_error_response_impl(client, "transport_error", "Provider operation transport failed.", 0, null, false)
