@@ -301,7 +301,7 @@ result := chat_completion_stream(client, messages, null, handler)
 
 The existing normalized stream callbacks are emitted after the complete response. For incremental network chunks, supply the additive `on_transport_chunk` option on a runtime with the stream-consumer API described below. `max_raw_response_bytes` now also bounds native downloads, before parsing. Custom transports remain responsible for enforcing the supplied download limit.
 
-If the callback throws, the stream call fails predictably with a normalized `stream_callback_error` response.
+Pass `null` to collect `emitted_events` in the result without invoking a callback. If a supplied callback throws, the stream call returns a normalized `stream_callback_error` response.
 
 ## Normalized Contract
 
