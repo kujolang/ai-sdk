@@ -1,6 +1,6 @@
 test_setup {
 	from src.providers import openai_provider, deepseek_provider, custom_openai_compatible_provider, custom_openai_compatible_provider_with_options
-	from src.ai_sdk import create_client, create_message, build_chat_payload, chat_completion, chat_completion_stream, embeddings, provider_supports, standard_error_response, normalize_provider_error, parse_json_contract, parse_sse_contract, should_retry_error_result, retry_delay_contract, merge_headers_for_request, normalize_non_stream_success, normalize_stream_success, resolve_options, sdk_default_limits, sdk_contract_version
+	from src.ai_sdk import create_client, create_message, build_chat_payload, chat_completion, chat_completion_stream, embeddings, provider_supports, standard_error_response, normalize_provider_error, parse_json_contract, parse_sse_contract, parse_sse_chunks_contract, should_retry_error_result, retry_delay_contract, merge_headers_for_request, normalize_non_stream_success, normalize_stream_success, resolve_options, sdk_default_limits, sdk_contract_version
 }
 
 test "resolve_options applies defaults and selected overrides" {
@@ -641,6 +641,14 @@ test "sse parser supports multiline data frames and done markers" {
 	assert_equal(parsed_events[0]["id"], "evt-1")
 	assert_equal(parsed_events[1]["id"], "evt-2")
 }
+
+test "fragmented SSE matches contiguous multiline frames and split terminators" {
+    chunks := ["da", null, "ta: {\"text\":\r\n", "data: \"café\"}\r\n\r", "\n: keepalive\ndata: [DO", "NE]", "\n\ndata: {\"ignored\":true}\n\n"]
+    expected := [{"text": "café"}]
+    assert_equal(parse_sse_chunks_contract(chunks), expected)
+    assert_equal(parse_sse_contract("data: {\"text\":\r\ndata: \"café\"}\r\n\r\n: keepalive\ndata: [DONE]\n\ndata: {\"ignored\":true}\n\n"), expected)
+}
+
 
 test "stream normalization handles no-delta events" {
 	provider := openai_provider()

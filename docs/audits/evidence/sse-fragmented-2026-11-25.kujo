@@ -1,0 +1,14 @@
+from src.ai_sdk import parse_sse_chunks_contract
+
+for chunk_count in [256, 1024, 4096] {
+    chunks := ["data: {\"text\":\""]
+    chunk := repeat("é", 64)
+    for index in range(0, chunk_count) { chunks = push(chunks, chunk) }
+    chunks = push(chunks, "\"}\n\ndata: [DONE]")
+    started := current_timestamp()
+    for sample in range(0, 5) {
+        events := parse_sse_chunks_contract(chunks)
+        assert(len(events) == 1 && byte_length(events[0]["text"]) == 128 * chunk_count, "stream content mismatch")
+    }
+    print(chunk_count, 128 * chunk_count, current_timestamp() - started)
+}

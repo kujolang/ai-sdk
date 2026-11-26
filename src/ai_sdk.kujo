@@ -2410,122 +2410,33 @@ func parse_sse_lines(body_text) { return parse_sse_lines_checked(body_text, fals
 func parse_sse_chunks(chunks) { return parse_sse_chunks_checked(chunks, false) }
 
 func parse_sse_lines_checked(body_text, strict) {
-	stream_events := []
-	current_payload := ""
-	lines := split(body_text, "\n")
-
-	i := 0
-	while i < len(lines) {
-		line := trim(lines[i])
-		if starts_with(line, "data:") {
-			payload_text := trim(substring(line, 5, len(line)))
-			if payload_text == "[DONE]" {
-				if current_payload != "" {
-					stream_events = append_sse_event(stream_events, current_payload, strict)
-					current_payload := ""
-				}
-				break
-			}
-			if payload_text != "" {
-				if current_payload == "" {
-					current_payload := payload_text
-				} else {
-					current_payload := current_payload + "\n" + payload_text
-				}
-			}
-		} else {
-			if line == "" {
-				if current_payload != "" {
-					stream_events = append_sse_event(stream_events, current_payload, strict)
-					current_payload := ""
-				}
-			}
-		}
-		i := i + 1
-	}
-
-	if current_payload != "" {
-		stream_events = append_sse_event(stream_events, current_payload, strict)
-	}
-
-	return stream_events
+    stream_events := []
+    payload_lines := []
+    for raw_line in split(body_text, "\n") {
+        line := trim(raw_line)
+        if starts_with(line, "data:") {
+            payload := trim(substring(line, 5, len(line)))
+            if payload == "[DONE]" { break }
+            if payload != "" { payload_lines = push(payload_lines, payload) }
+        } else if line == "" && len(payload_lines) > 0 {
+            stream_events = append_sse_event(stream_events, join(payload_lines, "\n"), strict)
+            payload_lines = []
+        }
+    }
+    if len(payload_lines) > 0 {
+        stream_events = append_sse_event(stream_events, join(payload_lines, "\n"), strict)
+    }
+    return stream_events
 }
 
 func parse_sse_chunks_checked(chunks, strict) {
-	stream_events := []
-	current_payload := ""
-	buffer := ""
-
-	i := 0
-	while i < len(chunks) {
-		chunk := chunks[i]
-		if type(chunk) != "string" {
-			i := i + 1
-			continue
-		}
-
-		buffer := buffer + chunk
-		lines := split(buffer, "\n")
-		line_count := len(lines)
-		if line_count == 0 {
-			i := i + 1
-			continue
-		}
-		buffer := lines[line_count - 1]
-
-		line_index := 0
-		while line_index < line_count - 1 {
-			line := trim(lines[line_index])
-			if starts_with(line, "data:") {
-				payload_text := trim(substring(line, 5, len(line)))
-				if payload_text == "[DONE]" {
-					if current_payload != "" {
-						stream_events = append_sse_event(stream_events, current_payload, strict)
-						current_payload := ""
-					}
-					return stream_events
-				}
-				if payload_text != "" {
-					if current_payload == "" {
-						current_payload := payload_text
-					} else {
-						current_payload := current_payload + "\n" + payload_text
-					}
-				}
-			} else {
-				if line == "" {
-					if current_payload != "" {
-						stream_events = append_sse_event(stream_events, current_payload, strict)
-						current_payload := ""
-					}
-				}
-			}
-
-			line_index := line_index + 1
-		}
-
-		i := i + 1
-	}
-
-	if trim(buffer) != "" {
-		line := trim(buffer)
-		if starts_with(line, "data:") {
-			payload_text := trim(substring(line, 5, len(line)))
-			if payload_text != "[DONE]" && payload_text != "" {
-				if current_payload == "" {
-					current_payload := payload_text
-				} else {
-					current_payload := current_payload + "\n" + payload_text
-				}
-			}
-		}
-	}
-
-	if current_payload != "" {
-		stream_events = append_sse_event(stream_events, current_payload, strict)
-	}
-
-	return stream_events
+    # The transport supplies buffered strings. Join fragments once instead of
+    # rescanning an unfinished line each time another fragment arrives.
+    text_chunks := []
+    for chunk in chunks {
+        if type(chunk) == "string" { text_chunks = push(text_chunks, chunk) }
+    }
+    return parse_sse_lines_checked(join(text_chunks, ""), strict)
 }
 
 func collect_stream_delta_chunks(stream_events) {
