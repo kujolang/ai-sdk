@@ -37,9 +37,11 @@ test "catalog preserves unknown operational metrics as null" {
 test "provider catalog derives capabilities without secrets" {
 	catalog := provider_model_catalog("builtin", "1", [openai_provider(), openrouter_provider(), deepseek_provider()])
 	assert_true(catalog["validation"]["ok"])
-	assert_equal(len(catalog["models"]), 3)
+	assert_equal(len(catalog["models"]), 4)
 	resolved := resolve_model_catalog_entry(catalog, "openai", "gpt-4.1-mini")
 	assert_true(resolved["ok"])
+	assert_true(resolve_model_catalog_entry(catalog, "deepseek", "deepseek-flash")["ok"])
+	assert_true(resolve_model_catalog_entry(catalog, "deepseek", "deepseek-v4-pro")["ok"])
 	assert_true(resolved["entry"]["supports_tools"])
 	assert_true(resolved["entry"]["supports_structured_output"])
 	assert_equal(has_key(resolved["entry"], "api_key"), 0)

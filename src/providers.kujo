@@ -200,19 +200,18 @@ export deepseek_provider := func() {
 		"base_url": "https://api.deepseek.com/v1",
 		"chat_path": "/chat/completions",
 		"api_key_env": "DEEPSEEK_API_KEY",
-		"default_model": "deepseek-chat",
-		"supported_models": ["deepseek-chat"],
-		"models": [{
-			"model": "deepseek-chat",
-			"quality_tier": "unknown",
-			"source": "deepseek_provider_preset"
-		}],
+		"default_model": "deepseek-flash",
+		"supported_models": ["deepseek-flash", "deepseek-v4-pro"],
+		"models": [
+			{"model": "deepseek-flash", "quality_tier": "unknown", "source": "deepseek_provider_preset"},
+			{"model": "deepseek-v4-pro", "quality_tier": "unknown", "source": "deepseek_provider_preset"}
+		],
 		"model_preferences": {
-			"frontier_reasoning": "deepseek-chat",
-			"adversarial_reasoning": "deepseek-chat",
-			"implementation_reasoning": "deepseek-chat",
-			"systems_reasoning": "deepseek-chat",
-			"strategic_reasoning": "deepseek-chat"
+			"frontier_reasoning": "deepseek-flash",
+			"adversarial_reasoning": "deepseek-flash",
+			"implementation_reasoning": "deepseek-flash",
+			"systems_reasoning": "deepseek-flash",
+			"strategic_reasoning": "deepseek-flash"
 		},
 		"capabilities": {
 			"streaming": true,

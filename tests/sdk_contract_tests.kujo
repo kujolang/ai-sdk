@@ -20,7 +20,7 @@ test "model preference resolver is provider-owned and deterministic" {
 	assert_equal(openrouter_result["model"], "openai/gpt-4.1-mini")
 
 	deepseek_result := resolve_model_preference(deepseek_provider(), preference)
-	assert_equal(deepseek_result["model"], "deepseek-chat")
+	assert_equal(deepseek_result["model"], "deepseek-flash")
 }
 
 test "model preference resolver honors explicit resolved ids and provider overrides" {
