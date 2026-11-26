@@ -1,5 +1,5 @@
 test_setup {
- from src.ai_sdk import create_client, chat_completion, embeddings
+ from src.ai_sdk import create_client, chat_completion, chat_completion_stream, embeddings
  from src.providers import openai_provider
 }
 
@@ -33,4 +33,27 @@ test "invalid redirect and incremental custom transport options fail before tran
   assert_equal(result["error"]["code"], "config_error")
   assert_equal(result["error"]["retryable"], false)
  }
+}
+
+test "injected UTF-8 bodies and chunks respect the wire byte limit" {
+ client := create_client(openai_provider(), "key")
+ body := "{\"choices\":[{\"message\":{\"content\":\"é\"}}]}"
+ options := {
+  "transport": func(url, request) { return Ok({"_status": 200, "_body": body}) },
+  "max_retries": 0, "max_raw_response_bytes": byte_length(body) - 1
+ }
+ error := chat_completion(client, [], options)
+ assert_equal(error["error"]["code"], "response_too_large")
+ assert_equal(error["raw"]["response_bytes"], byte_length(body))
+ options["max_raw_response_bytes"] = byte_length(body)
+ assert_equal(chat_completion(client, [], options)["output_text"], "é")
+
+ chunk := "data: {\"choices\":[{\"delta\":{\"content\":\"é\"},\"finish_reason\":\"stop\"}]}\n\n"
+ options["transport"] = func(url, request) { return Ok({"_status": 200, "_stream_chunks": [chunk]}) }
+ options["max_raw_response_bytes"] = byte_length(chunk) - 1
+ error = chat_completion_stream(client, [], options, null)
+ assert_equal(error["error"]["code"], "response_too_large")
+ assert_equal(error["raw"]["response_bytes"], byte_length(chunk))
+ options["max_raw_response_bytes"] = byte_length(chunk)
+ assert_equal(chat_completion_stream(client, [], options, null)["output_text"], "é")
 }

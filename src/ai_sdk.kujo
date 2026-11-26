@@ -949,7 +949,7 @@ func response_size_guardrail_error(client, status_code, body_text, resolved_opti
 		return null
 	}
 
-	body_size := len(body_text)
+	body_size := byte_length(body_text)
 	if body_size <= max_raw_response_bytes {
 		return null
 	}
@@ -3285,11 +3285,16 @@ func execute_request_once(client, messages, options, resolved_options, payload, 
 			if stream_requested {
 				stream_events := []
 				stream_chunks := dict_get_or(response, "_stream_chunks", dict_get_or(response, "stream_chunks", null))
-				if type(stream_chunks) == "array" {
+				limit := dict_get_or(resolved_options, "max_raw_response_bytes", 0)
+				if limit > 0 && type(stream_chunks) == "array" {
 					total_chunk_bytes := 0
-					for chunk in stream_chunks { if type(chunk) == "string" { total_chunk_bytes = total_chunk_bytes + len(chunk) } }
-					limit := dict_get_or(resolved_options, "max_raw_response_bytes", 0)
-					if limit > 0 && total_chunk_bytes > limit { result := standard_error_response_impl(client, "response_too_large", "Provider stream exceeded max_raw_response_bytes guardrail.", status_code, {"response_bytes": total_chunk_bytes, "max_raw_response_bytes": limit}, false); return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id) }
+					for chunk in stream_chunks {
+						if type(chunk) == "string" { total_chunk_bytes = total_chunk_bytes + byte_length(chunk) }
+					}
+					if total_chunk_bytes > limit {
+						result := standard_error_response_impl(client, "response_too_large", "Provider stream exceeded max_raw_response_bytes guardrail.", status_code, {"response_bytes": total_chunk_bytes, "max_raw_response_bytes": limit}, false)
+						return finalize_request_result(result, resolved_options, attempt, started_at, trace_id, request_id)
+					}
 				}
 				if dict_get_or(client["driver"], "id", "") != "openai-compatible" {
 					decoded := driver_hook(client, "decode_stream", {"status_code": status_code, "response": response, "body_text": body_text, "chunks": stream_chunks, "fallback_model": payload["model"]})
@@ -3920,6 +3925,7 @@ func chat_completion_stream_impl(client, messages, options, on_event) {
 	}
 
 	invoke_callback_safe := func(event, base_result) {
+		if type(on_event) == "null" { return {"ok": true, "error": ""} }
 		callback_error := null
 		try {
 			on_event(event)
@@ -4104,7 +4110,7 @@ export func execute_provider_operation(client, operation, base_url, path, method
     if resolved["read_timeout"] > 0 { request["read_timeout"] = resolved["read_timeout"] }
     if method == "POST" {
         body := to_json(payload)
-        if len(body) > 1048576 {
+        if byte_length(body) > 1048576 {
             return standard_error_response_impl(client, "request_too_large", "Provider operation request exceeds its size limit.", 0, null, false)
         }
         request["_body"] = body
